@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+package-lock.json
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+/tmp/
+*.tmp
+*.temp
+
+# Logs
+logs/
+*.log
+
+# Config - Sensitive
+config/openflo.json
+config/secrets.json
+
+# API Keys & Credentials
+**/.env
+**/*.key
+**/*.pem
+
+# Generated
+dist/
+build/
