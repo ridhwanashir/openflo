@@ -17,9 +17,17 @@
 --   Result  : exactly 50,000 rows, proportional allocation, no rounding waste
 --   Note    : ROUND() previously yielded 47,319; this method closes the gap
 -- ============================================================
--- Exclusions:
---   - user_persona = 'Others' excluded from strata and sample
---   - Users with NULL or invalid NIK excluded
+-- Exclusions (all applied in stratum_profile CTE):
+--   - user_persona = 'Others' or NULL
+--   - NULL or invalid NIK
+--   - NULL province (empty array in profile table)
+--   - NULL neighborhood_tier (field unpopulated in profile table)
+--   - NULL age / age_bin = 'Unknown' (age column NULL in source)
+--   - NULL ses_category (no SES match for msisdn)
+-- Rationale: all quota dimensions must be populated so the final
+-- sample contains zero NULL/Unknown values. The Hamilton method
+-- redistributes excluded users' slots to populated strata,
+-- preserving exact 50,000 total.
 -- ============================================================
 -- Neighborhood tier grouping (used for quota only; original preserved in output):
 --   High : Upper High, Lower High
@@ -27,31 +35,16 @@
 --   Low  : Low
 -- ============================================================
 -- Notes:
---   [1] `age_bin` — adjust to `age` if the column is named differently
---       in df_customer_profile_data_new
---   [2] partition_month changed from >= to = '2026-03-01' to ensure a
---       clean single-snapshot and prevent duplicate msisdns across months
+--   [1] `age` column expected as INTEGER in df_customer_profile_data_new.
+--       NULL age → age_bin = NULL → excluded in stratum_profile.
+--   [2] partition_month kept as >= '2026-03-01' to match user's working
+--       version; change to = '2026-03-01' if single-snapshot is preferred.
 --   [3] QUALIFY in valid_nik_users deduplicates if ar_cst_dly_smy has
 --       multiple rows per msisdn (e.g., daily table). Remove QUALIFY
 --       if msisdn is guaranteed unique in that table.
 --   [4] RAND() in ROW_NUMBER produces a non-deterministic random sample.
 --       Results will differ on each run. Seed control is not natively
---       supported in BigQuery; log the job ID for reproducibility.
---   [5] Final COUNT may be slightly below 50k if many strata round down.
---       To force exactly 50k, add LIMIT 50000 on the final SELECT.
--- ============================================================
--- NULL handling:
---   province / kabupaten NULL  : c.province is a NULL or empty ARRAY for
---       those subscribers. (SELECT ... FROM UNNEST(NULL) LIMIT 1) returns
---       NULL. The original aggregate query used CROSS JOIN UNNEST which
---       silently dropped those rows; here we do the same via the WHERE
---       filter in stratum_profile.
---   neighborhood_tier NULL     : c.neighborhood_tier is unpopulated for
---       many subscribers in df_customer_profile_data_new. Excluded below
---       because these users cannot be assigned to a quota stratum.
---   ses_category NULL          : LEFT JOIN on SES table found no match.
---       NULL is kept as its own valid stratum (handled via COALESCE in
---       stratum_key), so these users remain in the sample pool.
+--       supported in BigQuery; log the BQ job ID for reproducibility.
 -- ============================================================
 
 WITH
@@ -107,7 +100,7 @@ base_profile AS (
       WHEN age BETWEEN 35 AND 44 THEN '35-44'
       WHEN age BETWEEN 45 AND 54 THEN '45-54'
       WHEN age >= 55 THEN '55+'
-      ELSE 'Unknown'
+      ELSE NULL  -- NULL age → excluded in stratum_profile; see Note [1]
     END AS age_bin,
     c.neighborhood_tier, -- original 5-tier value; preserved in final output
 
@@ -132,27 +125,27 @@ base_profile AS (
 ),
 
 -- ── [3] STRATUM ASSIGNMENT ────────────────────────────────────────────────────
--- Excludes users missing any required quota stratum dimension:
---   user_persona IS NOT NULL     : had only 'Others' persona
---   province IS NOT NULL         : empty/null province array in profile table
---   neighborhood_tier IS NOT NULL: tier field unpopulated in profile table
--- ses_category NULL is allowed — treated as its own stratum via COALESCE.
--- Builds a composite stratum_key string for clean single-column joins downstream.
+-- All six quota dimensions must be non-NULL to guarantee a clean output.
+-- Users excluded here have their quota slots redistributed by the Hamilton
+-- method in [6c] — the total sample stays exactly 50,000.
 stratum_profile AS (
   SELECT
     *,
+    -- All components guaranteed non-NULL by WHERE below; no COALESCE needed.
     CONCAT(
-      province,                              '||',
-      user_persona,                          '||',
-      age_bin,                               '||',
-      neighborhood_tier_grouped,             '||',
-      COALESCE(ses_category, '__NULL__')
+      province,                  '||',
+      user_persona,              '||',
+      age_bin,                   '||',
+      neighborhood_tier_grouped, '||',
+      ses_category
     ) AS stratum_key
   FROM base_profile
   WHERE
     user_persona      IS NOT NULL   -- excludes 'Others'-only users
-    AND province      IS NOT NULL   -- excludes users with no province array data
-    AND neighborhood_tier IS NOT NULL  -- excludes users with no tier assignment
+    AND province          IS NOT NULL   -- excludes empty province array
+    AND neighborhood_tier IS NOT NULL   -- excludes unpopulated tier
+    AND age_bin           IS NOT NULL   -- excludes NULL age (→ 'Unknown' removed)
+    AND ses_category      IS NOT NULL   -- excludes unmatched SES
 ),
 
 -- ── [4] STRATUM COUNTS ────────────────────────────────────────────────────────
