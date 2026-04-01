@@ -8,8 +8,8 @@
 
 This tracker maintains visibility across all active projects, their status, documentation, and assigned agents.
 
-**Last Updated**: [DATE]  
-**Total Active Projects**: [NUMBER]
+**Last Updated**: 2026-04-01  
+**Total Active Projects**: 1
 
 ---
 
@@ -20,14 +20,14 @@ This tracker maintains visibility across all active projects, their status, docu
 
 | Project | Status | Agent | Last Updated | Next Milestone | Health |
 |---------|--------|-------|--------------|----------------|--------|
-| [NAME] | [STATUS] | [AGENT] | [DATE] | [MILESTONE] | 🟢/🟡/🔴 |
+| Income Score Modelling (IOH) | Planning — Sampling | Master + Sampling Agent | 2026-04-01 | Sampling strategy defined | 🟡 |
 
 ### Normal Priority
 *Projects in steady state*
 
 | Project | Status | Agent | Last Updated | Next Milestone | Health |
 |---------|--------|-------|--------------|----------------|--------|
-| [NAME] | [STATUS] | [AGENT] | [DATE] | [MILESTONE] | 🟢/🟡/🔴 |
+| — | — | — | — | — | — |
 
 ### Low Priority / Monitoring
 *Projects in maintenance mode*
@@ -73,11 +73,11 @@ This tracker maintains visibility across all active projects, their status, docu
 
 ## Quick Stats
 
-- **Total Active**: [NUMBER]
-- **High Priority**: [NUMBER]
-- **Normal Priority**: [NUMBER]
-- **Low Priority**: [NUMBER]
-- **Completed**: [NUMBER]
+- **Total Active**: 1
+- **High Priority**: 1
+- **Normal Priority**: 0
+- **Low Priority**: 0
+- **Completed**: 0
 
 ---
 
