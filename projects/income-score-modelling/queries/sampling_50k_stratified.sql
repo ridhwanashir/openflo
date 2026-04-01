@@ -4,12 +4,18 @@
 -- Author   : Data Scientist (IOH)
 -- Created  : 2026-04-01
 -- ============================================================
--- Strategy : Proportional Stratified Sampling (Option A)
+-- Strategy : Proportional Stratified Sampling — Hamilton / Largest Remainder
 --   Quota strata : province × user_persona × age_bin
 --                  × neighborhood_tier_grouped × ses_category
 --   Theoretical max strata: 32 × 17 × 6 × 3 × 5 = 48,960
---   Quota per stratum: ROUND(50000 × stratum_n / total_valid_nik_n)
---   Strata with proportional quota < 0.5 receive quota=0 (naturally excluded)
+--   Eligible universe (valid NIK + province + tier): 22,538,711
+--   Quota method:
+--     Step 1 — floor_quota  = FLOOR(50000 × stratum_n / total_n)
+--     Step 2 — remainder    = fractional part of exact quota
+--     Step 3 — distribute (50000 − sum_of_floors) extra slots, one per
+--              stratum, to the strata with the largest remainders
+--   Result  : exactly 50,000 rows, proportional allocation, no rounding waste
+--   Note    : ROUND() previously yielded 47,319; this method closes the gap
 -- ============================================================
 -- Exclusions:
 --   - user_persona = 'Others' excluded from strata and sample
@@ -166,19 +172,45 @@ total_n AS (
   FROM stratum_counts
 ),
 
--- ── [6] PROPORTIONAL QUOTA PER STRATUM ───────────────────────────────────────
--- quota_i = ROUND( 50000 × stratum_n_i / total_n )
--- Strata with proportional share < 0.5 naturally receive quota=0.
--- GREATEST(0, ...) guards against any unexpected negative edge case.
-stratum_quota AS (
+-- ── [6a] EXACT AND FLOOR QUOTA PER STRATUM ──────────────────────────────────
+-- Computes the exact proportional quota (with decimals) and its floor.
+-- The fractional remainder is used in step [6c] to distribute leftover slots.
+stratum_quota_raw AS (
   SELECT
     sc.stratum_key,
     sc.stratum_n,
-    CAST(
-      GREATEST(0, ROUND(50000.0 * sc.stratum_n / t.n))
-    AS INT64) AS quota
+    50000.0 * sc.stratum_n / t.n                                     AS exact_quota,
+    CAST(FLOOR(50000.0 * sc.stratum_n / t.n) AS INT64)               AS floor_quota,
+    (50000.0 * sc.stratum_n / t.n)
+      - FLOOR(50000.0 * sc.stratum_n / t.n)                          AS remainder
   FROM stratum_counts sc
   CROSS JOIN total_n t
+),
+
+-- ── [6b] LEFTOVER SLOTS ───────────────────────────────────────────────────────
+-- 50000 minus the sum of all floor quotas = number of extra +1 slots to award.
+-- (With ROUND this was the source of the 47,319 shortfall.)
+remainder_slots AS (
+  SELECT 50000 - SUM(floor_quota) AS slots_to_distribute
+  FROM stratum_quota_raw
+),
+
+-- ── [6c] HAMILTON ALLOCATION (FINAL QUOTA) ────────────────────────────────────
+-- Awards +1 to the strata with the largest fractional remainders until
+-- the total reaches exactly 50,000.
+-- Tie-break by stratum_key (alphabetical) for determinism.
+stratum_quota AS (
+  SELECT
+    sq.stratum_key,
+    sq.stratum_n,
+    sq.floor_quota
+      + CASE
+          WHEN ROW_NUMBER() OVER (ORDER BY sq.remainder DESC, sq.stratum_key ASC)
+               <= (SELECT slots_to_distribute FROM remainder_slots)
+          THEN 1
+          ELSE 0
+        END AS quota
+  FROM stratum_quota_raw sq
 ),
 
 -- ── [7] RANDOM RANK WITHIN STRATUM ───────────────────────────────────────────
