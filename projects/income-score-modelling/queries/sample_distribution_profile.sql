@@ -75,6 +75,16 @@ dist_ses_category AS (
   GROUP BY ses_category
 ),
 
+# dist brand
+dist_brand AS (
+  SELECT
+    'brand' AS dimension,
+    CAST(brand AS STRING) AS value,
+    COUNT(DISTINCT msisdn) AS n
+  FROM `data-int-advana-prd-77c3.core_analytics.rnr_income_prediction_sample_final`
+  GROUP BY brand
+),
+
 all_dims AS (
   SELECT * FROM dist_province
   UNION ALL
@@ -87,6 +97,8 @@ all_dims AS (
   SELECT * FROM dist_neighborhood_tier_grouped
   UNION ALL
   SELECT * FROM dist_ses_category
+    UNION ALL
+    SELECT * FROM dist_brand
 )
 
 SELECT

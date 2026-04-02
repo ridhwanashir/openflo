@@ -49,6 +49,11 @@
 --   [4] RAND() in ROW_NUMBER is non-deterministic. Log the BQ job ID.
 --   [5] h3i_ar_cst_dly_smy schema assumed identical to ar_cst_dly_smy
 --       (columns: dt_id, msisdn, nik). Adjust if schema differs.
+--   [6] neighborhood_tier_0824 is expected to have exactly 1 row per
+--       geohash_6 (no fan-out). Pre-check:
+--       SELECT COUNT(*), COUNT(DISTINCT geohash_6) FROM
+--       `data-int-advana-prd-77c3.core_analytics.neighborhood_tier_0824`
+--       Both counts must match before running this query.
 -- ============================================================
 
 WITH
@@ -148,14 +153,19 @@ base_profile AS (
       WHEN age >= 55 THEN '55+'
       ELSE NULL  -- NULL age → excluded in stratum_profile; see Note [1]
     END AS age_bin,
-    c.neighborhood_tier, -- original 5-tier value; preserved in final output
+    -- neighborhood_tier: prefer direct profile column (populated for IM3);
+    -- fall back to geohash-6 spatial lookup (covers 3ID where profile column is NULL).
+    COALESCE(c.neighborhood_tier, nt.neighborhood_tier) AS neighborhood_tier,
 
     -- Grouped 3-tier for quota stratification
     CASE
-      WHEN c.neighborhood_tier IN ('Upper High', 'Lower High') THEN 'High'
-      WHEN c.neighborhood_tier IN ('Upper Med',  'Lower Med')  THEN 'Med'
-      WHEN c.neighborhood_tier = 'Low'                         THEN 'Low'
-      ELSE NULL  -- handles unexpected values; excluded in [3] via stratum_key
+      WHEN COALESCE(c.neighborhood_tier, nt.neighborhood_tier)
+               IN ('Upper High', 'Lower High') THEN 'High'
+      WHEN COALESCE(c.neighborhood_tier, nt.neighborhood_tier)
+               IN ('Upper Med',  'Lower Med')  THEN 'Med'
+      WHEN COALESCE(c.neighborhood_tier, nt.neighborhood_tier)
+               = 'Low'                         THEN 'Low'
+      ELSE NULL  -- handles unexpected values; excluded in [3]
     END AS neighborhood_tier_grouped,
 
     ses.cat AS ses_category
@@ -166,6 +176,11 @@ base_profile AS (
   LEFT JOIN `data-int-advana-prd-77c3.core_analytics.msisdn_latest_ses_v1` ses
     ON  c.msisdn          = ses.msisdn
     AND ses.partition_month >= '2026-03-01'
+  LEFT JOIN `data-int-advana-prd-77c3.core_analytics.neighborhood_tier_0824` nt
+    ON LEFT(c.geohash, 6) = nt.geohash_6
+    -- Fallback tier for 3ID: c.neighborhood_tier is NULL for 3ID subscribers;
+    -- geohash-6 truncation from the profile geohash field maps to the tier table.
+    -- Assumes 1 row per geohash_6 in tier table (verify with pre-check below).
   WHERE
     c.partition_month >= '2026-03-01'  -- See Note [2]
 ),
