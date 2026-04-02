@@ -1,93 +1,232 @@
-# DS-IOH-Model-Income-Score
+# OpenFlo AI Agent Workflow System
 
+> **A reusable, template-based AI Agent orchestration framework.**  
+> Fork this repo, open in GitHub Copilot, give instructions, and your workflows are ready.
 
+---
 
-## Getting started
+## 🚀 Quick Start (30 Seconds)
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+```bash
+# 1. Clone/fork this template
+git clone https://github.com/yourusername/openflo.git my-project
+cd my-project
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+# 2. Open in VS Code + GitHub Copilot
 
-## Add your files
+# 3. Tell Copilot:
+"Initialize OpenFlo for my [project-name] project"
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+# 4. Done! Start creating agents and workflows.
+```
+
+---
+
+## 📋 What is OpenFlo?
+
+OpenFlo is a **template-based AI Agent orchestration system** designed to be:
+
+- **🍴 Forkable**: Copy and customize for any project
+- **🤖 Copilot-Native**: Designed to work with GitHub Copilot/Claude/Cursor
+- **📦 Ready-to-Use**: Pre-built templates, just fill in the blanks
+- **🔄 Reusable**: Same structure works for any domain (software, business, creative)
+- **📚 Self-Documenting**: Agents learn and improve automatically
+
+---
+
+## 🏗️ System Architecture
 
 ```
-cd existing_repo
-git remote add origin https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-model-income-score.git
-git branch -M master
-git push -uf origin master
+openflo/
+├── 📁 agents/                    # AI Agent configurations
+│   ├── 📄 MASTER_AGENT.md        # Central orchestrator (EDIT THIS FIRST)
+│   ├── 📁 specialized/           # Your custom agents go here
+│   └── 📁 templates/             # Agent creation templates
+│
+├── 📁 projects/                  # Project tracking
+│   ├── 📄 PROJECT_TRACKER.md     # All projects status
+│   └── 📁 [your-project]/        # Project-specific docs
+│
+├── 📁 workflows/                 # Reusable workflows
+│   ├── 📄 WORKFLOW_GUIDE.md      # How to create workflows
+│   └── 📁 templates/             # Ready-to-use workflow templates
+│
+├── 📁 memory/                    # Persistent context storage
+│   ├── 📁 master/                # Master agent memory
+│   └── 📁 specialized/           # Per-agent memory
+│
+├── 📁 documentation/             # Knowledge base
+│   └── 📁 prompts/               # Reusable AI prompts
+│
+├── 📄 README.md                  # This file
+├── 📄 QUICK_START.md             # 5-minute setup guide
+└── 📄 COPILOT_INSTRUCTIONS.md    # Copilot-specific commands
 ```
 
-## Integrate with your tools
+---
 
-- [ ] [Set up project integrations](https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-model-income-score/-/settings/integrations)
+## 🎯 Use Cases
 
-## Collaborate with your team
+| Use Case | What You Get |
+|----------|--------------|
+| **Software Development** | Project managers, ticket writers, code reviewers |
+| **Content Creation** | Writers, editors, SEO specialists |
+| **Business Operations** | Process automation, reporting, data analysis |
+| **Product Management** | PRD writers, user story creators, roadmap planners |
+| **Consulting** | Client onboarding, deliverable trackers, report generators |
+| **Personal Productivity** | Task managers, meeting notes, goal trackers |
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+---
 
-## Test and Deploy
+## 🛠️ Setup Instructions
 
-Use the built-in continuous integration in GitLab.
+### Step 1: Initialize the System
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Open GitHub Copilot Chat and type:
 
-***
+```
+Initialize OpenFlo for my project. My project is called "[PROJECT_NAME]" 
+and it's about [BRIEF_DESCRIPTION].
+```
 
-# Editing this README
+**Copilot will:**
+- Configure the Master Agent with your project details
+- Create your first specialized agent
+- Set up project tracking
+- Initialize memory systems
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Step 2: Create Your First Agent
 
-## Suggestions for a good README
+```
+Create a new specialized agent for [TASK_TYPE]. 
+This agent should handle [SPECIFIC_RESPONSIBILITIES].
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Example:**
+```
+Create a new specialized agent for content writing.
+This agent should handle blog posts, social media content, and email newsletters.
+```
 
-## Name
-Choose a self-explaining name for your project.
+### Step 3: Start Working
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```
+@content-writer Create a blog post about AI automation
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+---
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## 📖 Copilot Commands Reference
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### System Commands
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+| Command | What It Does |
+|---------|--------------|
+| `Initialize OpenFlo` | Set up the system for your project |
+| `Create agent for [task]` | Create a new specialized agent |
+| `List all agents` | Show all available agents |
+| `Show project status` | Display current project status |
+| `Update documentation` | Sync all docs with latest changes |
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Agent Commands
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+| Command | What It Does |
+|---------|--------------|
+| `@[agent-name] [task]` | Assign task to specific agent |
+| `Create workflow for [process]` | Generate new workflow template |
+| `Store in memory: [info]` | Save information for future reference |
+| `What do we know about [topic]?` | Retrieve from memory |
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+---
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## 🎨 Customization
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Edit These Files First:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+1. **`agents/MASTER_AGENT.md`** - Set your name, preferences, working style
+2. **`config/preferences.json`** - System-wide settings
+3. **`documentation/prompts/DEFAULT_PROMPT.md`** - Your default AI behavior
 
-## License
-For open source projects, say how it is licensed.
+### Add Your Own:
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- **Agents**: Copy `agents/templates/AGENT_TEMPLATE.md` to `agents/specialized/`
+- **Workflows**: Copy `workflows/templates/` and customize
+- **Prompts**: Add to `documentation/prompts/`
+
+---
+
+## 📚 Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [QUICK_START.md](QUICK_START.md) | 5-minute setup walkthrough |
+| [COPILOT_INSTRUCTIONS.md](COPILOT_INSTRUCTIONS.md) | Copilot-specific commands |
+| [agents/MASTER_AGENT.md](agents/MASTER_AGENT.md) | Master agent configuration |
+| [workflows/WORKFLOW_GUIDE.md](workflows/WORKFLOW_GUIDE.md) | Creating custom workflows |
+
+---
+
+## 🔌 Integrations (Optional)
+
+OpenFlo supports these integrations via MCP (Model Context Protocol):
+
+- **🌐 Browser Automation** - Web scraping, form filling
+- **💻 System Commands** - File operations, shell commands
+- **📧 Email** - Send/receive emails
+- **📅 Calendar** - Schedule management
+- **🎫 Jira/Linear** - Ticket management
+- **📝 Notion** - Document syncing
+- **💬 Slack/Discord** - Team notifications
+
+**To enable:** Edit `config/mcp-config.json` with your API keys.
+
+---
+
+## 🧪 Example: Content Agency Setup
+
+```bash
+# 1. Fork openflo
+git clone https://github.com/you/openflo.git my-agency
+cd my-agency
+
+# 2. In Copilot Chat:
+"Initialize OpenFlo for my content agency. 
+ We create blog posts, social media, and email campaigns for clients."
+
+# 3. Copilot creates:
+#    - Content Strategist Agent
+#    - Blog Writer Agent
+#    - Social Media Agent
+#    - Client Project Tracker
+
+# 4. Start working:
+"@blog-writer Create a 1500-word article about AI in healthcare"
+```
+
+---
+
+## 📊 Project Status
+
+**Template Version**: 1.0  
+**Last Updated**: 2026-02-13  
+**Status**: ✅ Production Ready  
+**Maintained By**: Community
+
+---
+
+## 🤝 Contributing
+
+1. Fork this template
+2. Customize for your use case
+3. Share your improvements back
+4. Help others get started
+
+---
+
+## 📄 License
+
+MIT License - Feel free to use, modify, and distribute.
+
+---
+
+**Ready to start?** → Open [QUICK_START.md](QUICK_START.md) or type `Initialize OpenFlo` in Copilot Chat.
