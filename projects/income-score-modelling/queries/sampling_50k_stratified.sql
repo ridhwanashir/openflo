@@ -5,29 +5,35 @@
 -- Created  : 2026-04-01
 -- ============================================================
 -- Strategy : Proportional Stratified Sampling — Hamilton / Largest Remainder
---   Quota strata : province × user_persona × age_bin
+--             Brand-split: 25,000 IM3 + 25,000 3ID = 50,000 total
+--   Quota strata : brand × province × user_persona × age_bin
 --                  × neighborhood_tier_grouped × ses_category
---   Theoretical max strata: 32 × 17 × 6 × 3 × 5 = 48,960
---   Eligible universe (valid NIK + province + tier): 22,538,711
---   Quota method:
---     Step 1 — floor_quota  = FLOOR(50000 × stratum_n / total_n)
+--   Theoretical max strata: 2 × 32 × 17 × 6 × 3 × 5 = 97,920
+--   Quota method (applied independently per brand, target n=25,000 each):
+--     Step 1 — floor_quota  = FLOOR(25000 × stratum_n / brand_total_n)
 --     Step 2 — remainder    = fractional part of exact quota
---     Step 3 — distribute (50000 − sum_of_floors) extra slots, one per
---              stratum, to the strata with the largest remainders
---   Result  : exactly 50,000 rows, proportional allocation, no rounding waste
---   Note    : ROUND() previously yielded 47,319; this method closes the gap
+--     Step 3 — distribute (25000 − sum_of_floors) extra slots per brand,
+--              one per stratum, to the strata with the largest remainders
+--   Result  : exactly 50,000 rows (25,000 IM3 + 25,000 3ID)
+-- ============================================================
+-- Brand identification (derived from msisdn prefix):
+--   IM3 prefixes : 62814, 62815, 62816, 62855, 62856, 62857, 62858
+--   3ID prefixes : 62895, 62896, 62897, 62898, 62899
+-- NIK source tables (separate per brand):
+--   IM3 : data-dtp-prd-aa1a.smy.ar_cst_dly_smy
+--   3ID : data-dtptechm-prd-c7ca.dwh.h3i_ar_cst_dly_smy
 -- ============================================================
 -- Exclusions (all applied in stratum_profile CTE):
 --   - user_persona = 'Others' or NULL
 --   - NULL or invalid NIK
 --   - NULL province (empty array in profile table)
 --   - NULL neighborhood_tier (field unpopulated in profile table)
---   - NULL age / age_bin = 'Unknown' (age column NULL in source)
+--   - NULL age (age column NULL in source)
 --   - NULL ses_category (no SES match for msisdn)
 -- Rationale: all quota dimensions must be populated so the final
 -- sample contains zero NULL/Unknown values. The Hamilton method
 -- redistributes excluded users' slots to populated strata,
--- preserving exact 50,000 total.
+-- preserving exactly 25,000 per brand (50,000 total).
 -- ============================================================
 -- Neighborhood tier grouping (used for quota only; original preserved in output):
 --   High : Upper High, Lower High
@@ -37,31 +43,26 @@
 -- Notes:
 --   [1] `age` column expected as INTEGER in df_customer_profile_data_new.
 --       NULL age → age_bin = NULL → excluded in stratum_profile.
---   [2] partition_month kept as >= '2026-03-01' to match user's working
---       version; change to = '2026-03-01' if single-snapshot is preferred.
---   [3] QUALIFY in valid_nik_users deduplicates if ar_cst_dly_smy has
---       multiple rows per msisdn (e.g., daily table). Remove QUALIFY
---       if msisdn is guaranteed unique in that table.
---   [4] RAND() in ROW_NUMBER produces a non-deterministic random sample.
---       Results will differ on each run. Seed control is not natively
---       supported in BigQuery; log the BQ job ID for reproducibility.
+--   [2] partition_month kept as >= '2026-03-01'; change to = for single-snapshot.
+--   [3] QUALIFY deduplicates if source tables are daily partitioned.
+--       Remove if msisdn is guaranteed unique.
+--   [4] RAND() in ROW_NUMBER is non-deterministic. Log the BQ job ID.
+--   [5] h3i_ar_cst_dly_smy schema assumed identical to ar_cst_dly_smy
+--       (columns: dt_id, msisdn, nik). Adjust if schema differs.
 -- ============================================================
 
 WITH
 
--- ── [1] VALID NIK UNIVERSE ────────────────────────────────────────────────────
--- Filters ar_cst_dly_smy to subscribers with a structurally valid
--- Indonesian NIK (16-digit KTP format validated by regex).
--- Indonesian NIK structure:
---   digits  1– 6 : kabupaten/kota area code
---   digits  7– 8 : day of birth (male: 01–31; female: 41–71)
---   digits  9–10 : month of birth (01–12)
---   digits 11–12 : birth year (2 digit)
---   digits 13–16 : sequential number
-valid_nik_users AS (
-  SELECT
-    DISTINCT msisdn,
-    nik
+-- ── [1a] VALID NIK — IM3 ─────────────────────────────────────────────────────
+-- Source : data-dtp-prd-aa1a.smy.ar_cst_dly_smy
+-- Filters to IM3 msisdn prefixes with structurally valid NIK.
+-- Indonesian NIK: 6-digit area | 2-digit day (F: +40) | 2-digit month |
+--                 2-digit year | 4-digit sequential number
+valid_nik_im3 AS (
+  SELECT DISTINCT
+    msisdn,
+    nik,
+    'IM3' AS brand
   FROM `data-dtp-prd-aa1a.smy.ar_cst_dly_smy`
   WHERE
     dt_id >= '2026-03-01'
@@ -70,9 +71,53 @@ valid_nik_users AS (
       nik,
       '^\\d{6}([04][1-9]|[1256][0-9]|[37][01])(0[1-9]|1[0-2])\\d{2}\\d{4}$'
     )
+    AND (
+      STARTS_WITH(CAST(msisdn AS STRING), '62814') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62815') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62816') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62855') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62856') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62857') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62858')
+    )
   QUALIFY
-    ROW_NUMBER() OVER (PARTITION BY msisdn ORDER BY nik) = 1
-    -- See Note [3]: keeps one row per msisdn deterministically
+    ROW_NUMBER() OVER (PARTITION BY msisdn ORDER BY nik) = 1  -- see Note [3]
+),
+
+-- ── [1b] VALID NIK — 3ID ─────────────────────────────────────────────────────
+-- Source : data-dtptechm-prd-c7ca.dwh.h3i_ar_cst_dly_smy
+-- See Note [5] regarding schema assumption.
+valid_nik_3id AS (
+  SELECT DISTINCT
+    msisdn,
+    nik,
+    '3ID' AS brand
+  FROM `data-dtptechm-prd-c7ca.dwh.h3i_ar_cst_dly_smy`
+  WHERE
+    dt_id >= '2026-03-01'
+    AND nik IS NOT NULL
+    AND REGEXP_CONTAINS(
+      nik,
+      '^\\d{6}([04][1-9]|[1256][0-9]|[37][01])(0[1-9]|1[0-2])\\d{2}\\d{4}$'
+    )
+    AND (
+      STARTS_WITH(CAST(msisdn AS STRING), '62895') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62896') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62897') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62898') OR
+      STARTS_WITH(CAST(msisdn AS STRING), '62899')
+    )
+  QUALIFY
+    ROW_NUMBER() OVER (PARTITION BY msisdn ORDER BY nik) = 1  -- see Note [3]
+),
+
+-- ── [1c] VALID NIK — COMBINED ────────────────────────────────────────────────
+-- UNION ALL is safe: msisdn prefix ranges are disjoint between brands,
+-- so no subscriber can appear in both CTEs above.
+valid_nik_users AS (
+  SELECT msisdn, nik, brand FROM valid_nik_im3
+  UNION ALL
+  SELECT msisdn, nik, brand FROM valid_nik_3id
 ),
 
 -- ── [2] BASE PROFILE: ONE ROW PER MSISDN ─────────────────────────────────────
@@ -85,6 +130,7 @@ base_profile AS (
   SELECT
     c.msisdn,
     v.nik,
+    v.brand,                                                                          -- IM3 or 3ID
 
     -- Array columns: pick first element for stratification & output
     (SELECT kab  FROM UNNEST(c.kabupaten)    AS kab  LIMIT 1)                     AS kabupaten,
@@ -132,7 +178,9 @@ stratum_profile AS (
   SELECT
     *,
     -- All components guaranteed non-NULL by WHERE below; no COALESCE needed.
+    -- brand is first so each stratum is inherently brand-scoped.
     CONCAT(
+      brand,                     '||',
       province,                  '||',
       user_persona,              '||',
       age_bin,                   '||',
@@ -149,57 +197,74 @@ stratum_profile AS (
 ),
 
 -- ── [4] STRATUM COUNTS ────────────────────────────────────────────────────────
--- Count of valid-NIK, non-Others users per quota stratum.
+-- Count per quota stratum. brand is carried separately for the per-brand
+-- denominator join in [6a] (already encoded in stratum_key but a separate
+-- column avoids parsing it back out).
 stratum_counts AS (
   SELECT
     stratum_key,
+    brand,
     COUNT(*) AS stratum_n
   FROM stratum_profile
-  GROUP BY stratum_key
+  GROUP BY stratum_key, brand
 ),
 
--- ── [5] TOTAL VALID-NIK UNIVERSE COUNT ───────────────────────────────────────
--- Denominator for proportional quota computation.
-total_n AS (
-  SELECT SUM(stratum_n) AS n
+-- ── [5] PER-BRAND UNIVERSE COUNT ─────────────────────────────────────────────
+-- Denominator for proportional quota; computed independently per brand
+-- so each brand targets exactly 25,000 rows.
+brand_total_n AS (
+  SELECT
+    brand,
+    SUM(stratum_n) AS n
   FROM stratum_counts
+  GROUP BY brand
 ),
 
 -- ── [6a] EXACT AND FLOOR QUOTA PER STRATUM ──────────────────────────────────
--- Computes the exact proportional quota (with decimals) and its floor.
--- The fractional remainder is used in step [6c] to distribute leftover slots.
+-- Per-brand proportional quota targeting 25,000 each.
+-- The fractional remainder is used in [6c] to distribute leftover slots.
 stratum_quota_raw AS (
   SELECT
     sc.stratum_key,
+    sc.brand,
     sc.stratum_n,
-    50000.0 * sc.stratum_n / t.n                                     AS exact_quota,
-    CAST(FLOOR(50000.0 * sc.stratum_n / t.n) AS INT64)               AS floor_quota,
-    (50000.0 * sc.stratum_n / t.n)
-      - FLOOR(50000.0 * sc.stratum_n / t.n)                          AS remainder
+    25000.0 * sc.stratum_n / bt.n                                     AS exact_quota,
+    CAST(FLOOR(25000.0 * sc.stratum_n / bt.n) AS INT64)               AS floor_quota,
+    (25000.0 * sc.stratum_n / bt.n)
+      - FLOOR(25000.0 * sc.stratum_n / bt.n)                          AS remainder
   FROM stratum_counts sc
-  CROSS JOIN total_n t
+  JOIN brand_total_n bt ON sc.brand = bt.brand
 ),
 
--- ── [6b] LEFTOVER SLOTS ───────────────────────────────────────────────────────
--- 50000 minus the sum of all floor quotas = number of extra +1 slots to award.
--- (With ROUND this was the source of the 47,319 shortfall.)
+-- ── [6b] LEFTOVER SLOTS PER BRAND ────────────────────────────────────────────
+-- Per brand: 25,000 minus sum of floor quotas = extra +1 slots to distribute.
 remainder_slots AS (
-  SELECT 50000 - SUM(floor_quota) AS slots_to_distribute
+  SELECT
+    brand,
+    25000 - SUM(floor_quota) AS slots_to_distribute
   FROM stratum_quota_raw
+  GROUP BY brand
 ),
 
 -- ── [6c] HAMILTON ALLOCATION (FINAL QUOTA) ────────────────────────────────────
--- Awards +1 to the strata with the largest fractional remainders until
--- the total reaches exactly 50,000.
+-- Awards +1 to strata with the largest fractional remainders, independently
+-- per brand, until each brand total reaches exactly 25,000.
 -- Tie-break by stratum_key (alphabetical) for determinism.
 stratum_quota AS (
   SELECT
     sq.stratum_key,
+    sq.brand,
     sq.stratum_n,
     sq.floor_quota
       + CASE
-          WHEN ROW_NUMBER() OVER (ORDER BY sq.remainder DESC, sq.stratum_key ASC)
-               <= (SELECT slots_to_distribute FROM remainder_slots)
+          WHEN ROW_NUMBER() OVER (
+                 PARTITION BY sq.brand
+                 ORDER BY sq.remainder DESC, sq.stratum_key ASC
+               ) <= (
+                 SELECT rs.slots_to_distribute
+                 FROM remainder_slots rs
+                 WHERE rs.brand = sq.brand
+               )
           THEN 1
           ELSE 0
         END AS quota
@@ -224,6 +289,7 @@ ranked AS (
 -- Output columns:
 --   msisdn                  — subscriber identifier (for internal linkage)
 --   nik                     — national ID (primary key for external provider matching)
+--   brand                   — IM3 or 3ID (exactly 25,000 each)
 --   kabupaten               — district (for reference; not used in quota strata)
 --   province                — province
 --   user_persona            — behavioral segment (Others excluded)
@@ -236,6 +302,7 @@ ranked AS (
 SELECT
   r.msisdn,
   r.nik,
+  r.brand,
   r.kabupaten,
   r.province,
   r.user_persona,
@@ -249,6 +316,7 @@ INNER JOIN stratum_quota q
 WHERE
   r.rn <= q.quota
 ORDER BY
+  r.brand,
   r.province,
   r.user_persona,
   r.age_bin,
