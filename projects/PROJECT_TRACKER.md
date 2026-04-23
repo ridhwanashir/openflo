@@ -8,7 +8,7 @@
 
 This tracker maintains visibility across all active projects, their status, documentation, and assigned agents.
 
-**Last Updated**: 2026-04-01  
+**Last Updated**: 2026-04-23  
 **Total Active Projects**: 1
 
 ---
@@ -20,7 +20,7 @@ This tracker maintains visibility across all active projects, their status, docu
 
 | Project | Status | Agent | Last Updated | Next Milestone | Health |
 |---------|--------|-------|--------------|----------------|--------|
-| Income Score Modelling (IOH) | Planning — Sampling | Master + Sampling Agent | 2026-04-01 | Sampling strategy defined | 🟡 |
+| Income Score Modelling (IOH) | In Progress — Data Preparation | Master Orchestrator | 2026-04-23 | Receive partner data → hash reversal → BigQuery join | 🟡 |
 
 ### Normal Priority
 *Projects in steady state*
@@ -86,17 +86,21 @@ This tracker maintains visibility across all active projects, their status, docu
 ### This Week
 | Project | Milestone | Date | Status |
 |---------|-----------|------|--------|
-| [NAME] | [MILESTONE] | [DATE] | [STATUS] |
+| Income Score Modelling (IOH) | Awaiting partner data receipt | TBD | ⬜ Pending |
 
 ### This Month
 | Project | Milestone | Date | Status |
 |---------|-----------|------|--------|
-| [NAME] | [MILESTONE] | [DATE] | [STATUS] |
+| Income Score Modelling (IOH) | Hash reversal + BigQuery join | TBD | ⬜ Blocked on data receipt |
+| Income Score Modelling (IOH) | Data validation | TBD | ⬜ Blocked on join |
+| Income Score Modelling (IOH) | EDA + label type decision | TBD | ⬜ Blocked on validation |
 
 ### Next Quarter
 | Project | Milestone | Date | Status |
 |---------|-----------|------|--------|
-| [NAME] | [MILESTONE] | [DATE] | [STATUS] |
+| Income Score Modelling (IOH) | Feature engineering | TBD | ⬜ Blocked on EDA sign-off |
+| Income Score Modelling (IOH) | Baseline model training | TBD | ⬜ Not started |
+| Income Score Modelling (IOH) | Model evaluation & registration | TBD | ⬜ Not started |
 
 ---
 
