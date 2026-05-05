@@ -28,4 +28,38 @@
 
 ---
 
+<<<<<<< HEAD
 *(Log subsequent key sessions below)*
+=======
+### 2026-03-18 — Session 1: CSV Baseline & Taxonomy
+
+**Type**: Implementation  
+**Summary**: First mapping session. Built taxonomy v2.1 (11 L1, 65 L2 in snake_case), ran notebook to generate `mis_app_category_v2.csv`. Added CATEGORY_FIXES (18 apps reclassified) and SECONDARY_LABELS (37 apps with dual-category).
+
+**Key Changes:**
+- `mis_app_category_v2.csv` created: 1,199 rows × 8 columns
+- New subcategory `bnpl_pay_later` added for BNPL apps
+- `to_safe()` normaliser added to enforce snake_case labels
+- All taxonomy labels converted to snake_case (no ampersands, hyphens → underscores)
+
+---
+
+### 2026-03-19 — Session 2: Notebook Consolidation
+
+**Type**: Refactoring  
+**Summary**: User requested consolidation of all description corrections into source DESC_* dictionaries directly, eliminating separate PATCH/CORRECTIONS cells. Notebook restructured to be fully reproducible top-to-bottom.
+
+**Key Changes:**
+- 22 description corrections + 3 patches (Ammana, Asetku, Touch 'n Go) inlined into `DESC_FINANCE`
+- Cells 37/38/39 (PATCH, unicode fix, CORRECTIONS) stubbed to comments
+- Cell 43 column-reorder cell updated to enforce correct 8-column output schema
+- `mis_app_category_v2.csv` re-saved: 1,199 rows × 8 cols, 0 empty descriptions, 100% coverage
+
+**Lessons from this session:**
+- Never use `replace_string_in_file` on `.ipynb` files — always use `edit_notebook_file`
+- Column-reorder cells between SECONDARY_LABELS and SAVE can silently drop columns if not updated in sync with schema changes
+
+---
+
+*Add new entries below as significant interactions occur.*
+>>>>>>> 3c310d3 (feat: Add comprehensive project status documentation and update workflow for app mapping sessions)

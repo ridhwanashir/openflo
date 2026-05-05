@@ -1,5 +1,9 @@
 # OpenFlo AI Agent Workflow System
 
+## Local IOH Project Status
+
+See [PROJECT_STATUS.md](PROJECT_STATUS.md) for the current application mapping project state, known assets, repo mapping, and next actions.
+
 > **A reusable, template-based AI Agent orchestration framework.**  
 > Fork this repo, open in GitHub Copilot, give instructions, and your workflows are ready.
 
