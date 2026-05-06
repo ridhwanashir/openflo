@@ -6,11 +6,11 @@ parses pipe-separated REPEATED STRING fields, and does a full
 WRITE_TRUNCATE load into BigQuery.
 
 Required Airflow Variables (set via Composer UI or `airflow variables set`):
-  GITHUB_PAT      — Personal Access Token with `repo` (read) scope
-  GITHUB_RAW_URL  — e.g. https://raw.githubusercontent.com/ridhwanashir/openflo/main/rnr_app_category_v2.csv
+  GITLAB_PAT      — GitLab Personal Access Token with `read_repository` scope
+  GITLAB_RAW_URL  — e.g. https://gitlab.com/<group>/<project>/-/raw/main/rnr_app_category_v2.csv
 
 Team editing workflow:
-  Edit rnr_app_category_v2.csv on GitHub (web editor or local push)
+  Edit rnr_app_category_v2.csv on GitLab (web editor or local push)
   → DAG picks up the latest committed version on next run
 """
 
@@ -74,12 +74,12 @@ def sync_catalog(**context):
     from google.cloud import bigquery
 
     # --- Download ---
-    pat = Variable.get("GITHUB_PAT")
-    raw_url = Variable.get("GITHUB_RAW_URL")
+    pat = Variable.get("GITLAB_PAT")
+    raw_url = Variable.get("GITLAB_RAW_URL")
 
     resp = requests.get(
         raw_url,
-        headers={"Authorization": f"token {pat}"},
+        headers={"PRIVATE-TOKEN": pat},
         timeout=30,
     )
     resp.raise_for_status()
