@@ -149,8 +149,8 @@ app_persona AS (
         ELSE NULL
       END AS persona
     FROM `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2` r,
-    UNNEST(SPLIT(r.sig_app_tags, '|')) AS tag
-    WHERE r.sig_app_tags IS NOT NULL
+    UNNEST(r.sig_app_tags) AS tag
+    WHERE ARRAY_LENGTH(r.sig_app_tags) > 0
   )
   WHERE persona IS NOT NULL
 ),
