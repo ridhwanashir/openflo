@@ -1,16 +1,17 @@
 """
 DAG: app_catalog_sync
 ---------------------
-Downloads rnr_app_category_v2.csv from the private GitHub repo,
-parses pipe-separated REPEATED STRING fields, and does a full
-WRITE_TRUNCATE load into BigQuery.
+Downloads rnr_app_category_v2.csv and taxonomy_reference.csv from the private
+GitLab repo, parses pipe-separated REPEATED STRING fields, and does a full
+WRITE_TRUNCATE load into BigQuery for both tables.
 
 Required Airflow Variables (set via Composer UI or `airflow variables set`):
-  GITLAB_PAT      — GitLab Personal Access Token with `read_repository` scope
-  GITLAB_RAW_URL  — e.g. https://gitlab.com/<group>/<project>/-/raw/main/rnr_app_category_v2.csv
+  GITLAB_PAT              — GitLab Personal Access Token with `read_repository` scope
+  GITLAB_RAW_URL          — raw URL to rnr_app_category_v2.csv in the repo
+  GITLAB_TAXONOMY_RAW_URL — raw URL to taxonomy_reference.csv in the repo
 
 Team editing workflow:
-  Edit rnr_app_category_v2.csv on GitLab (web editor or local push)
+  Edit rnr_app_category_v2.csv or taxonomy_reference.csv on GitLab
   → DAG picks up the latest committed version on next run
 """
 
@@ -43,6 +44,20 @@ BQ_SCHEMA = [
     {"name": "secondary_category",     "type": "STRING", "mode": "NULLABLE"},
     {"name": "secondary_subcategory",  "type": "STRING", "mode": "NULLABLE"},
     {"name": "description",            "type": "STRING", "mode": "NULLABLE"},
+    {"name": "review_status",          "type": "STRING", "mode": "NULLABLE"},
+]
+
+BQ_TAXONOMY_TABLE = "rnr_taxonomy_reference"
+BQ_TAXONOMY_TABLE_REF = f"{BQ_PROJECT}.{BQ_DATASET}.{BQ_TAXONOMY_TABLE}"
+
+BQ_TAXONOMY_SCHEMA = [
+    {"name": "category",         "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "subcategory",      "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "definition",       "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "include_examples", "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "exclude_examples", "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "app_count",        "type": "INTEGER", "mode": "NULLABLE"},
+    {"name": "taxonomy_version", "type": "STRING",  "mode": "NULLABLE"},
 ]
 
 
@@ -83,7 +98,7 @@ def sync_catalog(**context):
         timeout=30,
     )
     resp.raise_for_status()
-    logging.info("Downloaded %d bytes from GitHub", len(resp.content))
+    logging.info("Downloaded app catalog: %d bytes from GitLab", len(resp.content))
 
     # --- Parse ---
     reader = csv.DictReader(io.StringIO(resp.text))
@@ -116,20 +131,76 @@ def sync_catalog(**context):
 
 
 # ---------------------------------------------------------------------------
-# Task 2: validate
+# Task 2: sync_taxonomy
+# ---------------------------------------------------------------------------
+def sync_taxonomy(**context):
+    from google.cloud import bigquery
+
+    pat = Variable.get("GITLAB_PAT")
+    raw_url = Variable.get("GITLAB_TAXONOMY_RAW_URL")
+
+    resp = requests.get(
+        raw_url,
+        headers={"PRIVATE-TOKEN": pat},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    logging.info("Downloaded taxonomy: %d bytes from GitLab", len(resp.content))
+
+    reader = csv.DictReader(io.StringIO(resp.text))
+    rows = []
+    for row in reader:
+        if row.get("app_count"):
+            try:
+                row["app_count"] = int(row["app_count"])
+            except ValueError:
+                row["app_count"] = None
+        for key in list(row.keys()):
+            if row[key] == "":
+                row[key] = None
+        rows.append(row)
+    logging.info("Parsed %d taxonomy rows", len(rows))
+
+    client = bigquery.Client(project=BQ_PROJECT)
+    schema = [bigquery.SchemaField(**f) for f in BQ_TAXONOMY_SCHEMA]
+    job_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+    )
+    job = client.load_table_from_json(rows, BQ_TAXONOMY_TABLE_REF, job_config=job_config)
+    job.result()
+    logging.info("Loaded %d taxonomy rows to %s", job.output_rows, BQ_TAXONOMY_TABLE_REF)
+    context["ti"].xcom_push(key="taxonomy_rows", value=job.output_rows)
+
+
+# ---------------------------------------------------------------------------
+# Task 3: validate
 # ---------------------------------------------------------------------------
 def validate(**context):
     from google.cloud import bigquery
 
     loaded_rows = context["ti"].xcom_pull(key="loaded_rows", task_ids="sync_catalog")
+    taxonomy_rows = context["ti"].xcom_pull(key="taxonomy_rows", task_ids="sync_taxonomy")
 
+    # --- App catalog floor check ---
+    # 1,199 is the baseline row count when this DAG was written.
+    # Catches catastrophic failures: empty file, half-truncated upload, etc.
     assert loaded_rows >= 1199, (
         f"Row count check failed: expected >= 1199, got {loaded_rows}"
     )
 
+    # --- Taxonomy floor check ---
+    assert taxonomy_rows >= 70, (
+        f"Taxonomy row count check failed: expected >= 70, got {taxonomy_rows}"
+    )
+
     client = bigquery.Client(project=BQ_PROJECT)
 
-    # Spot-check: BCA must have exactly 3 sig_app_tags
+    # --- Spot-check: BCA must have exactly 3 sig_app_tags ---
+    # BCA is a stable, well-known entry (tags: Klikbca, BCAS_MOBILE2, MYBCA).
+    # This catches silent REPEATED field parsing failures — a file that loads
+    # successfully but has all multi-value fields collapsed into a single string.
     query = f"""
         SELECT ARRAY_LENGTH(sig_app_tags) AS tag_count
         FROM `{BQ_TABLE_REF}`
@@ -143,8 +214,9 @@ def validate(**context):
     )
 
     logging.info(
-        "Validation passed — %d rows loaded, BCA has %d sig_app_tags",
+        "Validation passed — %d app rows, %d taxonomy rows, BCA has %d sig_app_tags",
         loaded_rows,
+        taxonomy_rows,
         result[0].tag_count,
     )
 
@@ -161,7 +233,7 @@ default_args = {
 
 with DAG(
     dag_id="app_catalog_sync",
-    description="Full-replace sync of rnr_app_category_v2 from GitHub to BigQuery",
+    description="Full-replace sync of rnr_app_category_v2 and rnr_taxonomy_reference from GitLab to BigQuery",
     schedule_interval="@daily",
     start_date=datetime(2026, 5, 6),
     catchup=False,
@@ -174,9 +246,14 @@ with DAG(
         python_callable=sync_catalog,
     )
 
+    t_taxonomy = PythonOperator(
+        task_id="sync_taxonomy",
+        python_callable=sync_taxonomy,
+    )
+
     t_validate = PythonOperator(
         task_id="validate",
         python_callable=validate,
     )
 
-    t_sync >> t_validate
+    [t_sync, t_taxonomy] >> t_validate
