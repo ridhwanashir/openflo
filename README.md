@@ -1,93 +1,114 @@
-# DS-IOH-Application-Mapping
+# DS-IOH Application Mapping
 
+End-to-end pipeline for maintaining the IOH app taxonomy catalog and generating weekly user persona segments in BigQuery.
 
+---
 
-## Getting started
+## What This Does
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. **Source of truth** — two CSVs in this repo define the app taxonomy
+2. **Automated sync** — an Airflow DAG runs daily, pulls both CSVs from this repo, and does a full-replace load into BigQuery
+3. **Persona generation** — a SQL query reads the BQ catalog and classifies IOH subscribers into 18 behavioral personas based on weekly app usage
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+---
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Architecture
 
 ```
-cd existing_repo
-git remote add origin https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-application-mapping.git
-git branch -M master
-git push -uf origin master
+This repo (GitLab)
+├── rnr_app_category_v2.csv     ← edit here to update app catalog
+└── taxonomy_reference.csv      ← edit here to update taxonomy
+         │
+         │  Airflow DAG (daily, Cloud Composer)
+         │  dags/app_catalog_sync.py
+         ▼
+BigQuery: core_analytics.rnr_app_category_v2        (1,200+ app entries)
+BigQuery: core_analytics.rnr_taxonomy_reference     (65 category/subcategory rows)
+         │
+         │  Run user_persona_query_v2.sql on demand
+         ▼
+BigQuery: core_analytics.rnr_user_persona_small_segment_temp_3
+         (18 personas × High Engaged Users only)
 ```
 
-## Integrate with your tools
+**GCP Project:** `data-int-advana-prd-77c3` | **BQ Dataset:** `core_analytics`
 
-* [Set up project integrations](https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-application-mapping/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Quick Start
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+See [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) for full step-by-step instructions.
 
-## Test and Deploy
+### Edit the app catalog
+1. Open `rnr_app_category_v2.csv` on GitLab → click **Edit**
+2. Use `|` (pipe) to separate multiple values in `sig_app_tags` and `source_app_names_old`
+3. Commit → trigger the `app_catalog_sync` DAG in Cloud Composer
 
-Use the built-in continuous integration in GitLab.
+### First-time deployment
+1. Upload `dags/app_catalog_sync.py` to your Composer GCS bucket (`gs://<bucket>/dags/`)
+2. Set three Airflow Variables: `GITLAB_PAT`, `GITLAB_RAW_URL`, `GITLAB_TAXONOMY_RAW_URL`
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+---
 
-***
+## Files
 
-# Editing this README
+| File | Purpose |
+|---|---|
+| `rnr_app_category_v2.csv` | App catalog — 1,200+ apps with categories and match tags |
+| `taxonomy_reference.csv` | Valid category/subcategory hierarchy with app counts |
+| `dags/app_catalog_sync.py` | Airflow DAG — syncs both CSVs to BigQuery daily |
+| `user_persona_query_v2.sql` | Generates weekly user persona segments |
+| `MAINTENANCE_GUIDE.md` | Full operations and troubleshooting guide |
+| `app_mapping_migration.ipynb` | Historical migration notebook |
+| `csv_to_json.ipynb` | Converts CSV to Avro/JSONL for manual BQ loads |
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+---
 
-## Suggestions for a good README
+## BigQuery Tables
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+| Table | Rows | Description |
+|---|---|---|
+| `rnr_app_category_v2` | ~1,200 | App catalog with REPEATED `sig_app_tags` and `source_app_names_old` |
+| `rnr_taxonomy_reference` | 73 | Category/subcategory reference with definitions and boundary rules |
+| `rnr_user_persona_small_segment_temp_3` | Weekly | High Engaged Users × 18 personas |
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## User Personas (16 total)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+| Persona | Based on |
+|---|---|
+| `active_in_social_media` | Social, messaging, short video apps |
+| `beauty_enthusiast` | Beauty & personal care apps |
+| `cashless_lifestyle` | E-wallet, payment, BNPL apps |
+| `crypto_trader` | Crypto & digital asset apps |
+| `ecommerce_addict` | Marketplace apps |
+| `food_hunter` | Dining & food delivery apps |
+| `gamers` | Mobile games & gaming platforms |
+| `health_enthusiast` | Telemedicine & fitness apps |
+| `mom_and_baby` | Maternal & family apps |
+| `movie_lovers` | Video streaming apps |
+| `music_addict` | Music streaming apps |
+| `muslim_fashion` | Hardcoded list of hijab/modest fashion brands |
+| `premium_fashion_shopper` | Fashion commerce apps (excl. muslim_fashion) |
+| `ride_hailing_loyalist` | Ride-hailing apps |
+| `student_e-learning` | Education & LMS apps |
+| `travel_enthusiast` | Travel booking apps |
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+---
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Setup
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### Airflow Variables required
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+| Variable | Value |
+|---|---|
+| `GITLAB_PAT` | GitLab PAT with `read_repository` scope |
+| `GITLAB_RAW_URL` | Raw URL to `rnr_app_category_v2.csv` |
+| `GITLAB_TAXONOMY_RAW_URL` | Raw URL to `taxonomy_reference.csv` |
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### GitLab remote
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```bash
+git remote add upstream https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-application-mapping.git
+```
