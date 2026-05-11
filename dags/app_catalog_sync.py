@@ -1,23 +1,29 @@
 """
 DAG: app_catalog_sync
 ---------------------
-Downloads rnr_app_category_v2.csv and taxonomy_reference.csv from the private
-GitLab repo, parses pipe-separated REPEATED STRING fields, and does a full
-WRITE_TRUNCATE load into BigQuery for both tables.
+Downloads rnr_app_category_v2.csv from the private GitLab repo, parses
+pipe-separated REPEATED STRING fields (including the `persona` column),
+and does a full WRITE_TRUNCATE load into BigQuery.
+
+The taxonomy table (`rnr_taxonomy_reference`) is **derived** from the app
+catalog in-memory — no separate GitLab download. Each DAG run appends a
+date-partitioned snapshot (partition-level TRUNCATE for idempotency on
+same-day re-runs).
 
 Required Airflow Variables (set via Composer UI or `airflow variables set`):
-  GITLAB_PAT              — GitLab Personal Access Token with `read_repository` scope
-  GITLAB_RAW_URL          — raw URL to rnr_app_category_v2.csv in the repo
-  GITLAB_TAXONOMY_RAW_URL — raw URL to taxonomy_reference.csv in the repo
+  GITLAB_PAT     — GitLab Personal Access Token with `read_repository` scope
+  GITLAB_RAW_URL — raw URL to rnr_app_category_v2.csv in the repo
 
 Team editing workflow:
-  Edit rnr_app_category_v2.csv or taxonomy_reference.csv on GitLab
+  Edit rnr_app_category_v2.csv on GitLab
   → DAG picks up the latest committed version on next run
+  → Taxonomy is auto-derived from the catalog (no separate file to maintain)
 """
 
 import csv
 import io
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import requests
@@ -33,11 +39,11 @@ BQ_DATASET = "core_analytics"
 BQ_TABLE = "rnr_app_category_v2"
 BQ_TABLE_REF = f"{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE}"
 
-ARRAY_FIELDS = {"sig_app_tags", "source_app_names_old"}
+ARRAY_FIELDS = {"sig_app_tags", "nio_aggr_app_tags", "persona"}
 
 BQ_SCHEMA = [
     {"name": "app_name",               "type": "STRING", "mode": "NULLABLE"},
-    {"name": "source_app_names_old",   "type": "STRING", "mode": "REPEATED"},
+    {"name": "nio_aggr_app_tags",      "type": "STRING", "mode": "REPEATED"},
     {"name": "sig_app_tags",           "type": "STRING", "mode": "REPEATED"},
     {"name": "category",               "type": "STRING", "mode": "NULLABLE"},
     {"name": "subcategory",            "type": "STRING", "mode": "NULLABLE"},
@@ -45,19 +51,20 @@ BQ_SCHEMA = [
     {"name": "secondary_subcategory",  "type": "STRING", "mode": "NULLABLE"},
     {"name": "description",            "type": "STRING", "mode": "NULLABLE"},
     {"name": "review_status",          "type": "STRING", "mode": "NULLABLE"},
+    {"name": "persona",                "type": "STRING", "mode": "REPEATED"},
 ]
 
 BQ_TAXONOMY_TABLE = "rnr_taxonomy_reference"
 BQ_TAXONOMY_TABLE_REF = f"{BQ_PROJECT}.{BQ_DATASET}.{BQ_TAXONOMY_TABLE}"
 
+TAXONOMY_EXAMPLES_COUNT = 5  # number of sample apps per subcategory
+
 BQ_TAXONOMY_SCHEMA = [
     {"name": "category",         "type": "STRING",  "mode": "NULLABLE"},
     {"name": "subcategory",      "type": "STRING",  "mode": "NULLABLE"},
-    {"name": "definition",       "type": "STRING",  "mode": "NULLABLE"},
     {"name": "include_examples", "type": "STRING",  "mode": "NULLABLE"},
-    {"name": "exclude_examples", "type": "STRING",  "mode": "NULLABLE"},
     {"name": "app_count",        "type": "INTEGER", "mode": "NULLABLE"},
-    {"name": "taxonomy_version", "type": "STRING",  "mode": "NULLABLE"},
+    {"name": "taxonomy_version", "type": "DATE",    "mode": "NULLABLE"},
 ]
 
 
@@ -82,8 +89,7 @@ def _parse_array_field(value: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Task 1 + 2 + 3: download → parse → load  (single callable, avoids XCom
-#                 size limits for ~1,200 rows × 8 columns)
+# Task 1: sync_catalog — download → parse → load app catalog to BQ
 # ---------------------------------------------------------------------------
 def sync_catalog(**context):
     from google.cloud import bigquery
@@ -126,51 +132,66 @@ def sync_catalog(**context):
 
     loaded = job.output_rows
     logging.info("Loaded %d rows to %s", loaded, BQ_TABLE_REF)
-    # Push row count for the validate task
+
+    # Push for downstream tasks
     context["ti"].xcom_push(key="loaded_rows", value=loaded)
+    context["ti"].xcom_push(key="catalog_rows", value=rows)
 
 
 # ---------------------------------------------------------------------------
-# Task 2: sync_taxonomy
+# Task 2: sync_taxonomy — derive from catalog rows, load as date partition
 # ---------------------------------------------------------------------------
 def sync_taxonomy(**context):
     from google.cloud import bigquery
 
-    pat = Variable.get("GITLAB_PAT")
-    raw_url = Variable.get("GITLAB_TAXONOMY_RAW_URL")
+    catalog_rows = context["ti"].xcom_pull(key="catalog_rows", task_ids="sync_catalog")
 
-    resp = requests.get(
-        raw_url,
-        headers={"PRIVATE-TOKEN": pat},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    logging.info("Downloaded taxonomy: %d bytes from GitLab", len(resp.content))
+    # --- Aggregate per (category, subcategory) in CSV order ---
+    buckets = defaultdict(lambda: {"count": 0, "examples": []})
+    for row in catalog_rows:
+        cat = row.get("category")
+        sub = row.get("subcategory")
+        if not cat or not sub:
+            continue
+        key = (cat, sub)
+        buckets[key]["count"] += 1
+        if len(buckets[key]["examples"]) < TAXONOMY_EXAMPLES_COUNT:
+            buckets[key]["examples"].append(row["app_name"])
 
-    reader = csv.DictReader(io.StringIO(resp.text))
-    rows = []
-    for row in reader:
-        if row.get("app_count"):
-            try:
-                row["app_count"] = int(row["app_count"])
-            except ValueError:
-                row["app_count"] = None
-        for key in list(row.keys()):
-            if row[key] == "":
-                row[key] = None
-        rows.append(row)
-    logging.info("Parsed %d taxonomy rows", len(rows))
+    # --- Build taxonomy rows ---
+    snapshot_date = context["data_interval_start"].date().isoformat()
+    taxonomy_rows = []
+    for (cat, sub), info in sorted(buckets.items()):
+        taxonomy_rows.append({
+            "category": cat,
+            "subcategory": sub,
+            "include_examples": "|".join(info["examples"]),
+            "app_count": info["count"],
+            "taxonomy_version": snapshot_date,
+        })
+    logging.info("Derived %d taxonomy rows for partition %s", len(taxonomy_rows), snapshot_date)
 
+    # --- Load with partition-level TRUNCATE ---
+    # Writing to table$YYYYMMDD overwrites only that day's partition,
+    # preserving historical partitions (idempotent on same-day re-runs).
     client = bigquery.Client(project=BQ_PROJECT)
     schema = [bigquery.SchemaField(**f) for f in BQ_TAXONOMY_SCHEMA]
+    partition_suffix = snapshot_date.replace("-", "")
+    partitioned_dest = f"{BQ_TAXONOMY_TABLE_REF}${partition_suffix}"
+
     job_config = bigquery.LoadJobConfig(
         schema=schema,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        time_partitioning=bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.DAY,
+            field="taxonomy_version",
+        ),
     )
-    job = client.load_table_from_json(rows, BQ_TAXONOMY_TABLE_REF, job_config=job_config)
+    job = client.load_table_from_json(taxonomy_rows, partitioned_dest, job_config=job_config)
     job.result()
-    logging.info("Loaded %d taxonomy rows to %s", job.output_rows, BQ_TAXONOMY_TABLE_REF)
+
+    logging.info("Loaded %d taxonomy rows to %s", job.output_rows, partitioned_dest)
     context["ti"].xcom_push(key="taxonomy_rows", value=job.output_rows)
 
 
@@ -233,7 +254,7 @@ default_args = {
 
 with DAG(
     dag_id="app_catalog_sync",
-    description="Full-replace sync of rnr_app_category_v2 and rnr_taxonomy_reference from GitLab to BigQuery",
+    description="Sync app catalog from GitLab to BigQuery; derive taxonomy snapshot automatically",
     schedule_interval="@daily",
     start_date=datetime(2026, 5, 6),
     catchup=False,
@@ -256,4 +277,5 @@ with DAG(
         python_callable=validate,
     )
 
-    [t_sync, t_taxonomy] >> t_validate
+    # Sequential: taxonomy depends on catalog rows via XCom
+    t_sync >> t_taxonomy >> t_validate
