@@ -63,7 +63,7 @@ There are two CSV files in this repo that the DAG syncs to BigQuery.
 | Column | Type | Notes |
 |---|---|---|
 | `app_name` | Single value | Display name of the app |
-| `source_app_names_old` | **Pipe-separated** (`\|`) | Alternative/legacy app identifiers |
+| `nio_aggr_app_tags` | **Pipe-separated** (`\|`) | Alternative/legacy app identifiers (maps to NIO aggregated app tags) |
 | `sig_app_tags` | **Pipe-separated** (`\|`) | Tags used to match user activity |
 | `category` | Single value | Primary category |
 | `subcategory` | Single value | Primary subcategory |
@@ -71,6 +71,7 @@ There are two CSV files in this repo that the DAG syncs to BigQuery.
 | `secondary_subcategory` | Single value | Optional second subcategory |
 | `description` | Single value | Free text description |
 | `review_status` | Single value | Classification confidence: `correct`, `debatable`, `needs_external_verification` |
+| `persona` | **Pipe-separated** (`\|`) | Assigned persona(s) for user segmentation (e.g. `cashless_lifestyle`, `ecommerce_addict\|cashless_lifestyle`) |
 
 ### Multi-value field format
 
@@ -98,25 +99,23 @@ SomeApp,,tag1|tag2,Category,,,,
 
 ---
 
-### File 2: `taxonomy_reference.csv`
+### File 2: `taxonomy_reference.csv` (historical artifact)
 
 **BigQuery target:** `core_analytics.rnr_taxonomy_reference`
 
-This file defines the **valid categories and subcategories** used by the user persona query. It also tracks the current app count per subcategory.
+> **Note:** The taxonomy table is now **auto-derived** from the app catalog by the DAG on each run. You no longer need to manually maintain `taxonomy_reference.csv`. The CSV is kept in the repo as a historical reference only.
+
+The taxonomy table in BigQuery is partitioned by `taxonomy_version` (DATE), with one snapshot per DAG run. Each run samples up to 5 example apps per subcategory from the catalog.
 
 | Column | Type | Notes |
 |---|---|---|
 | `category` | Single value | Top-level category (e.g. `finance`, `entertainment`) |
 | `subcategory` | Single value | Subcategory (e.g. `mobile_banking`, `mobile_games`) |
-| `definition` | Single value | What this subcategory means and what belongs in it |
-| `include_examples` | Single value | Comma-separated example apps that belong here |
-| `exclude_examples` | Single value | What explicitly does NOT belong (boundary rules) |
-| `app_count` | Integer | Number of apps in this subcategory (auto-computed from catalog) |
-| `taxonomy_version` | Single value | Version tag (e.g. `v2.2`) |
+| `include_examples` | Pipe-separated | Up to 5 example app names from the catalog |
+| `app_count` | Integer | Number of apps in this subcategory (auto-computed) |
+| `taxonomy_version` | DATE | DAG execution date (partition key) |
 
-> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, you must also add the corresponding row to `taxonomy_reference.csv`, otherwise it won't appear as a valid persona in the query.
-
-> **Note on `app_count`:** This column is informational. It is recomputed automatically by the taxonomy rebuild script when remappings are applied. You do not need to update it manually — just update the category/subcategory on the app rows and re-run the script.
+> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, the taxonomy is updated automatically on the next DAG run. No manual edit to `taxonomy_reference.csv` is needed.
 
 ---
 
@@ -190,7 +189,6 @@ Click **+** and add:
 |---|---|
 | `GITLAB_PAT` | Your GitLab Personal Access Token (see below) |
 | `GITLAB_RAW_URL` | Raw URL to `rnr_app_category_v2.csv` (see below) |
-| `GITLAB_TAXONOMY_RAW_URL` | Raw URL to `taxonomy_reference.csv` (see below) |
 
 ### How to get your GitLab PAT
 
@@ -208,8 +206,7 @@ Click **+** and add:
 For each file, open it in GitLab → click **Open raw** → copy the URL from your browser.
 
 ```
-GITLAB_RAW_URL          = https://gitlab.com/<group>/<project>/-/raw/main/rnr_app_category_v2.csv
-GITLAB_TAXONOMY_RAW_URL = https://gitlab.com/<group>/<project>/-/raw/main/taxonomy_reference.csv
+GITLAB_RAW_URL = https://gitlab.com/<group>/<project>/-/raw/main/rnr_app_category_v2.csv
 ```
 
 ---
@@ -223,13 +220,11 @@ After editing either CSV and committing to GitLab:
 3. Click the **▶ Trigger DAG** button (the play icon on the right)
 4. Optionally click the DAG name → **Graph View** to watch task progress in real time
 
-You will see three tasks run:
+You will see three tasks run in sequence:
 ```
-[sync_catalog]  \  
-                 │—→ [validate]
-[sync_taxonomy] /
+[sync_catalog] → [sync_taxonomy] → [validate]
 ```
-`sync_catalog` and `sync_taxonomy` run **in parallel**. `validate` runs after both succeed.
+`sync_catalog` downloads and loads the app catalog. `sync_taxonomy` derives the taxonomy from the loaded catalog rows. `validate` runs checks after both.
 
 ### Choosing a sync schedule
 
@@ -255,9 +250,7 @@ Under 1 minute for ~1,200 app rows + 73 taxonomy rows. If it takes longer than 3
 **File:** `dags/app_catalog_sync.py`
 
 ```
-[sync_catalog]  \
-                 ├─→ [validate]
-[sync_taxonomy] /
+[sync_catalog] → [sync_taxonomy] → [validate]
 ```
 
 ### Task 1: `sync_catalog`
@@ -265,20 +258,25 @@ Under 1 minute for ~1,200 app rows + 73 taxonomy rows. If it takes longer than 3
 1. Reads `GITLAB_PAT` and `GITLAB_RAW_URL` from Airflow Variables
 2. Downloads `rnr_app_category_v2.csv` from GitLab using the PAT
 3. Parses every row:
-   - `sig_app_tags` and `source_app_names_old` → split on `|` → Python list
+   - `sig_app_tags`, `nio_aggr_app_tags`, and `persona` → split on `|` → Python list
    - Empty strings → `None`
 4. Loads all rows to BigQuery with **WRITE_TRUNCATE** (full replace)
    - Target: `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2`
-   - `sig_app_tags` and `source_app_names_old` loaded as `REPEATED STRING`
+   - `sig_app_tags`, `nio_aggr_app_tags`, and `persona` loaded as `REPEATED STRING`
+5. Pushes parsed rows to XCom for `sync_taxonomy` to consume
 
 ### Task 2: `sync_taxonomy`
 
-1. Reads `GITLAB_PAT` and `GITLAB_TAXONOMY_RAW_URL` from Airflow Variables
-2. Downloads `taxonomy_reference.csv` from GitLab using the same PAT
-3. Parses every row, converts `app_count` column to INTEGER
-4. Loads to `core_analytics.rnr_taxonomy_reference` with **WRITE_TRUNCATE**
+1. Pulls parsed catalog rows from XCom (no GitLab download — derived from the catalog)
+2. Aggregates per `(category, subcategory)` in CSV order:
+   - Counts apps per subcategory
+   - Samples up to 5 example app names per subcategory
+3. Sets `taxonomy_version` to the DAG execution date
+4. Loads to `core_analytics.rnr_taxonomy_reference` with **partition-level TRUNCATE**
+   - Destination: `rnr_taxonomy_reference$YYYYMMDD` (overwrites only that day’s partition)
+   - Historical partitions are preserved
 
-`sync_catalog` and `sync_taxonomy` run **in parallel** — they don't depend on each other.
+`sync_catalog` → `sync_taxonomy` run **sequentially** — taxonomy depends on catalog rows.
 
 ### Task 3: `validate`
 
@@ -289,8 +287,8 @@ Asserts `loaded_rows >= 1199` (the baseline count when this DAG was written).
 **Why:** Catches catastrophic failures — empty file upload, half-truncated CSV, encoding corruption.
 
 #### Check 2: Taxonomy row count floor
-Asserts `taxonomy_rows >= 70` (current taxonomy v2.2 has 73 rows).  
-**Why:** Catches a missing or empty `taxonomy_reference.csv`.
+Asserts `taxonomy_rows >= 70` (current taxonomy has ~73 subcategories).  
+**Why:** Catches an empty or corrupted catalog that yields too few subcategories.
 
 #### Check 3: BCA spot-check
 Queries BQ and asserts `ARRAY_LENGTH(sig_app_tags) = 3` for the `BCA` row.  
@@ -322,7 +320,7 @@ To switch, edit the `validate` function in `dags/app_catalog_sync.py`.
 | Field | BQ Type | Mode |
 |---|---|---|
 | `app_name` | STRING | NULLABLE |
-| `source_app_names_old` | STRING | **REPEATED** |
+| `nio_aggr_app_tags` | STRING | **REPEATED** |
 | `sig_app_tags` | STRING | **REPEATED** |
 | `category` | STRING | NULLABLE |
 | `subcategory` | STRING | NULLABLE |
@@ -330,20 +328,20 @@ To switch, edit the `validate` function in `dags/app_catalog_sync.py`.
 | `secondary_subcategory` | STRING | NULLABLE |
 | `description` | STRING | NULLABLE |
 | `review_status` | STRING | NULLABLE |
+| `persona` | STRING | **REPEATED** |
 
 ### Taxonomy Reference
 
-**Table:** `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference`
+**Table:** `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference`  
+**Partitioned by:** `taxonomy_version` (DATE, daily)
 
 | Field | BQ Type | Mode |
 |---|---|---|
 | `category` | STRING | NULLABLE |
 | `subcategory` | STRING | NULLABLE |
-| `definition` | STRING | NULLABLE |
 | `include_examples` | STRING | NULLABLE |
-| `exclude_examples` | STRING | NULLABLE |
 | `app_count` | INTEGER | NULLABLE |
-| `taxonomy_version` | STRING | NULLABLE |
+| `taxonomy_version` | DATE | NULLABLE |
 
 ### Querying REPEATED fields
 
@@ -371,7 +369,9 @@ UNNEST(sig_app_tags) AS tag;
 
 ## 9. What is `rnr_user_persona_small_segment_temp_3`?
 
-This is the **output table** produced by running `user_persona_query_v2.sql`. It's not maintained by the DAG — it is regenerated on demand by running the SQL.
+This is the **output table** produced by the weekly stored procedure `bq_sp_national_stg_nio_appsrtgout_usecase_weekly`. It is not maintained by the DAG — it is regenerated weekly by the SP.
+
+> **Note:** `user_persona_query_v2.sql` is deprecated. Use the stored procedure instead.
 
 ### What it contains
 
@@ -405,45 +405,61 @@ Only **High Engaged Users** are included (filtered from all engagement groups).
 | `mom_and_baby` | `health_wellness`: maternal_family |
 | `movie_lovers` | `entertainment`: video_streaming |
 | `music_addict` | `entertainment`: music_streaming |
-| `muslim_fashion` | Hardcoded app list (e.g. Zoya, Elzatta) |
+| `muslim_fashion` | CSV-labeled apps + behavioral intersection (ecommerce ∩ religious) |
+| `news_reader` | `information_education`: news_media |
 | `premium_fashion_shopper` | `commerce`: fashion, excluding muslim_fashion apps |
+| `religious_content` | `information_education`: religious_spiritual |
 | `ride_hailing_loyalist` | `transportation`: ride_hailing |
 | `student_e-learning` | `information_education`: general_education, campus_lms |
 | `travel_enthusiast` | `transportation`: travel_booking |
 
 ### How to regenerate it
 
-Run `user_persona_query_v2.sql` in BigQuery. It uses `CREATE OR REPLACE TABLE`, so it always overwrites the previous result.
+The stored procedure runs weekly on schedule. To run manually:
 
-**Important:** The query reads `sig_app_tags` as a `REPEATED STRING` field (using `UNNEST`). This only works correctly if the BQ table was loaded by the DAG — **not** manually with a plain STRING schema.
+```sql
+CALL `appl-int-df-prd-wd2y.bq_df_dm3_prd_owned_sor.bq_sp_national_stg_nio_appsrtgout_usecase_weekly`();
+```
+
+The version-controlled SP source is at `stored_procedures/bq_sp_national_stg_nio_appsrtgout_usecase_weekly.sql`.
+
+**Important:** The SP reads `persona` as a `REPEATED STRING` field from the BQ catalog. This only works correctly if the BQ table was loaded by the DAG.
 
 ### How persona assignment works
 
 ```
+The stored procedure reads persona labels directly from the BQ catalog:
+  → rnr_app_category_v2.persona (REPEATED STRING) maps each app to persona(s)
+  → No hardcoded CASE logic for persona assignment
+
 For each app in the catalog:
   → each sig_app_tag is UNNEST-ed into one row
   → tag is LOWER/TRIM normalized to match raw app usage data
-  → (category, subcategory) maps to a persona via CASE logic
+  → app’s persona(s) come from the persona column (data-driven)
 
 For each subscriber (msisdn):
   → JOIN their weekly app usage against the tag-to-persona mapping
   → aggregate RTF (Recency, Traffic, Frequency) per persona
   → compute deciles within each persona group
   → classify into engagement groups
-  → output only High Engaged Users
+  → output all engagement groups (not just High Engaged)
+
+Special: muslim_fashion has a supplementary intersection check
+  → users in both ecommerce and religious apps get muslim_fashion
+  → this is in addition to CSV-labeled muslim_fashion apps
 ```
 
 ---
 
 ## 10. Troubleshooting
 
-### DAG fails at `sync_taxonomy` — HTTP 401 or 404
+### DAG fails at `sync_taxonomy` — empty taxonomy
 
-Same as `sync_catalog`: check `GITLAB_PAT` expiry and verify `GITLAB_TAXONOMY_RAW_URL` is correct.
+The taxonomy is derived from the app catalog. If the catalog has no valid `category`/`subcategory` values, the taxonomy will be empty. Check the CSV.
 
 ### taxonomy_reference.csv has a new subcategory but persona query doesn't use it
 
-The persona query uses hardcoded `(category, subcategory)` CASE logic in `user_persona_query_v2.sql`. Adding a row to `taxonomy_reference.csv` does **not** automatically create a new persona — a developer must add a new `WHEN` clause to the SQL.
+The persona mapping now lives in the `persona` column of `rnr_app_category_v2.csv`. Adding a new subcategory without assigning a persona value means those apps will fall into `others` in the SP output. To assign a persona, update the `persona` column for the relevant app rows.
 
 ### DAG fails at `sync_catalog` — HTTP 401
 
@@ -468,8 +484,9 @@ The table is fully replaced each run. Check the CSV in GitLab — if the CSV is 
 ### The persona query returns wrong results
 
 1. Check that the BQ table was loaded by the DAG (not manually edited)
-2. Verify `sig_app_tags` is `REPEATED STRING` in the BQ schema (not a plain string with pipes in it)
-3. The query uses `UNNEST(r.sig_app_tags)` — this only works correctly if the field is `REPEATED`
+2. Verify `sig_app_tags` and `persona` are `REPEATED STRING` in the BQ schema (not plain strings with pipes)
+3. The SP uses `UNNEST(r.persona)` — this only works correctly if the field is `REPEATED`
+4. Check that `persona` values in the CSV match what the SP expects
 
 ### DAG is not visible in Airflow UI
 
@@ -483,26 +500,29 @@ The DAG file hasn't been uploaded to the Composer GCS bucket yet, or Airflow has
 EDIT APP CATALOG
   → Edit rnr_app_category_v2.csv on GitLab
   → Use | to separate multi-values (no brackets, no commas)
+  → persona column: assign persona(s) per app, pipe-separated if multiple
   → Commit the change
 
-EDIT TAXONOMY
-  → Edit taxonomy_reference.csv on GitLab
-  → If adding new subcategory, also update user_persona_query_v2.sql
-  → Commit the change
+TAXONOMY
+  → Auto-derived from app catalog on each DAG run
+  → No manual editing needed
+  → Historical snapshots preserved via date partitioning
 
 SYNC TO BQ
   → Airflow UI → app_catalog_sync → Trigger DAG ▶
   → Wait ~1 min → all three tasks should turn green
+  → Task flow: sync_catalog → sync_taxonomy → validate
 
 CHECK BQ
   SELECT COUNT(*) FROM `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2`
   -- Should return >= 1199
-  SELECT COUNT(*) FROM `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference`
-  -- Should return >= 70
+  SELECT taxonomy_version, COUNT(*) FROM `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference` GROUP BY 1 ORDER BY 1 DESC
+  -- Should return >= 70 rows per partition
 
-REGENERATE PERSONA TABLE
-  → Run user_persona_query_v2.sql in BigQuery
-  → Creates/replaces rnr_user_persona_small_segment_temp_3
+PERSONA PIPELINE
+  → SP runs weekly: bq_sp_national_stg_nio_appsrtgout_usecase_weekly
+  → Reads persona from rnr_app_category_v2.persona (data-driven, no hardcoded mapping)
+  → Output: stg_nio_appsrtgout_usecase_weekly
 
 CHANGE PAT (when it expires)
   → GitLab → Profile → Access Tokens → new token (read_repository)

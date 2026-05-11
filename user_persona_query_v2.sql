@@ -1,5 +1,14 @@
 -- =============================================================================
--- User Persona Query v2
+-- DEPRECATED — Use stored procedure instead:
+--   appl-int-df-prd-wd2y.bq_df_dm3_prd_owned_sor.bq_sp_national_stg_nio_appsrtgout_usecase_weekly
+--
+-- This query is kept as a historical reference. The SP is the canonical
+-- persona pipeline — it reads persona directly from rnr_app_category_v2.persona
+-- (REPEATED STRING), eliminating the hardcoded CASE mapping below.
+--
+-- See: stored_procedures/bq_sp_national_stg_nio_appsrtgout_usecase_weekly.sql
+-- =============================================================================
+-- User Persona Query v2 (DEPRECATED)
 -- -----------------------------------------------------------------------------
 -- Changes from v1:
 --   • Replaces the hardcoded ~100-app STRUCT list with a dynamic JOIN against
