@@ -8,9 +8,39 @@
 stages:
 - test
 - secret-detection
+- sync-csv
+
 variables:
   SECRET_DETECTION_ENABLED: 'true'
+
 secret_detection:
   stage: secret-detection
+
 include:
 - template: Security/Secret-Detection.gitlab-ci.yml
+- project: 'cbo/b2b-data-monetization/data-engineer/ci-template'
+  file: '.gcp-wif-auth.yml'
+
+# ---------------------------------------------------------------------------
+# Upload rnr_app_category_v2.csv to GCS on every push to the default branch.
+# Cloud Composer reads the file from GCS — no direct GitLab access needed.
+#
+# Placeholders to fill before merging:
+#   GCP_WI_PROVIDER_PATH      — Workload Identity provider resource path
+#   GCP_SERVICE_ACCOUNT_EMAIL — SA with roles/storage.objectAdmin on the bucket
+# ---------------------------------------------------------------------------
+upload-csv-to-gcs:
+  stage: sync-csv
+  extends: .gcp-wif-auth
+  variables:
+    GCP_WI_PROVIDER_PATH: "projects/427976717042/locations/global/workloadIdentityPools/gitlab-pool/providers/gitlab-ioh-provider"
+    GCP_SERVICE_ACCOUNT_EMAIL: "gitlab-ci-de@appl-int-df-prd-wd2y.iam.gserviceaccount.com"
+    GCP_TARGET_PROJECT_ID: "data-int-advana-prd-77c3"
+    # GCP_TARGET_PROJECT_ID: data-int-advana-prd-77c3
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - rnr_app_category_v2.csv
+  script:
+    - gcloud storage cp rnr_app_category_v2.csv
+        gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv

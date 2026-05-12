@@ -1,8 +1,8 @@
 """
 DAG: app_catalog_sync
 ---------------------
-Downloads rnr_app_category_v2.csv from the private GitLab repo, parses
-pipe-separated REPEATED STRING fields (including the `persona` column),
+Downloads rnr_app_category_v2.csv from GCS (pushed there by GitLab CI),
+parses pipe-separated REPEATED STRING fields (including the `persona` column),
 and does a full WRITE_TRUNCATE load into BigQuery.
 
 The taxonomy table (`rnr_taxonomy_reference`) is **derived** from the app
@@ -10,13 +10,13 @@ catalog in-memory — no separate GitLab download. Each DAG run appends a
 date-partitioned snapshot (partition-level TRUNCATE for idempotency on
 same-day re-runs).
 
-Required Airflow Variables (set via Composer UI or `airflow variables set`):
-  GITLAB_PAT     — GitLab Personal Access Token with `read_repository` scope
-  GITLAB_RAW_URL — raw URL to rnr_app_category_v2.csv in the repo
+No Airflow Variables required — the Composer SA reads directly from GCS.
+GCS source: gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
 
 Team editing workflow:
   Edit rnr_app_category_v2.csv on GitLab
-  → DAG picks up the latest committed version on next run
+  → GitLab CI (WIF) uploads the file to GCS on every push to the default branch
+  → DAG picks up the latest version from GCS on next run
   → Taxonomy is auto-derived from the catalog (no separate file to maintain)
 """
 
@@ -26,10 +26,10 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-import requests
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
+from teams import TeamsNotifier
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,20 +94,19 @@ def _parse_array_field(value: str) -> list:
 def sync_catalog(**context):
     from google.cloud import bigquery
 
-    # --- Download ---
-    pat = Variable.get("GITLAB_PAT")
-    raw_url = Variable.get("GITLAB_RAW_URL")
+    # --- Download from GCS ---
+    from google.cloud import storage as gcs
 
-    resp = requests.get(
-        raw_url,
-        headers={"PRIVATE-TOKEN": pat},
-        timeout=30,
+    csv_text = (
+        gcs.Client()
+        .bucket("create_gcs_table")
+        .blob("app-category-mapping/rnr_app_category_v2.csv")
+        .download_as_text()
     )
-    resp.raise_for_status()
-    logging.info("Downloaded app catalog: %d bytes from GitLab", len(resp.content))
+    logging.info("Downloaded app catalog from GCS: %d bytes", len(csv_text))
 
     # --- Parse ---
-    reader = csv.DictReader(io.StringIO(resp.text))
+    reader = csv.DictReader(io.StringIO(csv_text))
     rows = []
     for row in reader:
         for field in ARRAY_FIELDS:
@@ -247,34 +246,42 @@ def validate(**context):
 # ---------------------------------------------------------------------------
 default_args = {
     "owner": "ds-ioh",
-    "retries": 1,
+    "retries": 0,
     "retry_delay": timedelta(minutes=5),
-    "email_on_failure": False,
 }
+
+# None = manual-trigger only; to re-enable scheduled runs, add
+# "app_catalog_sync": "@daily" to the `schedule_interval` Airflow Variable.
+_schedule_intervals = Variable.get("schedule_interval", deserialize_json=True, default_var={})
+schedule_interval = _schedule_intervals.get("app_catalog_sync", None)
 
 with DAG(
     dag_id="app_catalog_sync",
     description="Sync app catalog from GitLab to BigQuery; derive taxonomy snapshot automatically",
-    schedule_interval="@daily",
+    schedule_interval=schedule_interval,  # None = manual trigger; set via Variable to schedule
     start_date=datetime(2026, 5, 6),
     catchup=False,
     default_args=default_args,
+    on_failure_callback=TeamsNotifier(),
     tags=["app-mapping", "catalog"],
 ) as dag:
 
     t_sync = PythonOperator(
         task_id="sync_catalog",
         python_callable=sync_catalog,
+        provide_context=True,
     )
 
     t_taxonomy = PythonOperator(
         task_id="sync_taxonomy",
         python_callable=sync_taxonomy,
+        provide_context=True,
     )
 
     t_validate = PythonOperator(
         task_id="validate",
         python_callable=validate,
+        provide_context=True,
     )
 
     # Sequential: taxonomy depends on catalog rows via XCom

@@ -10,7 +10,7 @@
 2. [The CSVs — Source of Truth](#2-the-csvs--source-of-truth)
 3. [How to Update the App Catalog](#3-how-to-update-the-app-catalog)
 4. [One-Time Setup: Deploy the Airflow DAG](#4-one-time-setup-deploy-the-airflow-dag)
-5. [One-Time Setup: Set Airflow Variables](#5-one-time-setup-set-airflow-variables)
+5. [One-Time Setup: CI/CD & GCS Configuration](#5-one-time-setup-cicd--gcs-configuration)
 6. [Running the DAG (Manual Trigger)](#6-running-the-dag-manual-trigger)
 7. [How the DAG Works (Step by Step)](#7-how-the-dag-works-step-by-step)
 8. [BigQuery Tables Reference](#8-bigquery-tables-reference)
@@ -175,39 +175,31 @@ The Airflow scheduler picks up new DAG files within ~1–2 minutes automatically
 
 ---
 
-## 5. One-Time Setup: Set Airflow Variables
+## 5. One-Time Setup: CI/CD & GCS Configuration
 
-The DAG needs two Airflow Variables to run. These are set once and stored securely in Composer.
+The DAG reads `rnr_app_category_v2.csv` from GCS — **no Airflow Variables needed**.
+GitLab CI uploads the file to GCS automatically on every push to the default branch.
 
-### How to set them
+### GCS source path
 
-Go to: **Cloud Composer → [your environment] → Open Airflow UI → Admin → Variables**
+```
+gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
+```
 
-Click **+** and add:
+The Composer Service Account already has read access to this bucket.
 
-| Key | Value |
+### Completing the GitLab CI job (one-time)
+
+Before merging `.gitlab-ci.yml` for the first time, fill in the two placeholders
+in the `upload-csv-to-gcs` job:
+
+| Placeholder | What to put there |
 |---|---|
-| `GITLAB_PAT` | Your GitLab Personal Access Token (see below) |
-| `GITLAB_RAW_URL` | Raw URL to `rnr_app_category_v2.csv` (see below) |
+| `<PLACEHOLDER_WI_PROVIDER_PATH>` | Workload Identity provider resource path (ask your platform team) |
+| `<PLACEHOLDER_SA_EMAIL>` | Service Account email with `roles/storage.objectAdmin` on the bucket |
 
-### How to get your GitLab PAT
-
-1. Go to GitLab → top-right avatar → **Edit profile**
-2. Left sidebar → **Access Tokens**
-3. Click **Add new token**
-4. Name it something like `composer-app-catalog-read`
-5. Expiry: set a date (e.g. 1 year)
-6. Scopes: check only **`read_repository`**
-7. Click **Create personal access token**
-8. **Copy the token now** — you won't see it again
-
-### How to get the raw file URLs
-
-For each file, open it in GitLab → click **Open raw** → copy the URL from your browser.
-
-```
-GITLAB_RAW_URL = https://gitlab.com/<group>/<project>/-/raw/main/rnr_app_category_v2.csv
-```
+Once filled, every push that modifies `rnr_app_category_v2.csv` will automatically
+upload the latest version to GCS.
 
 ---
 
@@ -255,9 +247,8 @@ Under 1 minute for ~1,200 app rows + 73 taxonomy rows. If it takes longer than 3
 
 ### Task 1: `sync_catalog`
 
-1. Reads `GITLAB_PAT` and `GITLAB_RAW_URL` from Airflow Variables
-2. Downloads `rnr_app_category_v2.csv` from GitLab using the PAT
-3. Parses every row:
+1. Downloads `rnr_app_category_v2.csv` from GCS (`gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv`)
+2. Parses every row:
    - `sig_app_tags`, `nio_aggr_app_tags`, and `persona` → split on `|` → Python list
    - Empty strings → `None`
 4. Loads all rows to BigQuery with **WRITE_TRUNCATE** (full replace)
@@ -461,13 +452,16 @@ The taxonomy is derived from the app catalog. If the catalog has no valid `categ
 
 The persona mapping now lives in the `persona` column of `rnr_app_category_v2.csv`. Adding a new subcategory without assigning a persona value means those apps will fall into `others` in the SP output. To assign a persona, update the `persona` column for the relevant app rows.
 
-### DAG fails at `sync_catalog` — HTTP 401
+### DAG fails at `sync_catalog` — GCS 403 / permission denied
 
-Your GitLab PAT is invalid or expired. Generate a new one (see [Section 5](#5-one-time-setup-set-airflow-variables)) and update the `GITLAB_PAT` Airflow Variable.
+The Composer Service Account lacks read access to `gs://create_gcs_table`. Ask your
+platform team to grant `roles/storage.objectViewer` on the bucket.
 
-### DAG fails at `sync_catalog` — HTTP 404
+### DAG fails at `sync_catalog` — GCS 404 / blob not found
 
-The `GITLAB_RAW_URL` is wrong. Verify by pasting the URL into your browser while logged into GitLab — it should show the raw CSV text. Update the variable.
+The CSV has not been uploaded to GCS yet. Either:
+- Trigger the GitLab CI `upload-csv-to-gcs` job manually, or
+- Upload manually: `gcloud storage cp rnr_app_category_v2.csv gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv`
 
 ### DAG fails at `validate` — row count < 1199
 
@@ -524,9 +518,8 @@ PERSONA PIPELINE
   → Reads persona from rnr_app_category_v2.persona (data-driven, no hardcoded mapping)
   → Output: stg_nio_appsrtgout_usecase_weekly
 
-CHANGE PAT (when it expires)
-  → GitLab → Profile → Access Tokens → new token (read_repository)
-  → Airflow UI → Admin → Variables → update GITLAB_PAT
+FORCE GCS UPLOAD (if CI didn't run)
+  → gcloud storage cp rnr_app_category_v2.csv gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
 
 DEPLOY UPDATED DAG
   → gcloud storage cp dags/app_catalog_sync.py gs://<bucket>/dags/
