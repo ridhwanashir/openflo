@@ -64,7 +64,7 @@ productivity_tools,office_collaboration,"Document editing, spreadsheets, and tea
 productivity_tools,stock_media_assets,"Stock photo, video, and digital asset download platforms","Shutterstock, Freepik, Unsplash, Pixabay","Social media photo sharing, design tools",8,v2.2
 productivity_tools,system_utility,"Device management, file managers, cleaners, and system tools","Files by Google, CCleaner, Truecaller",Security/antivirus apps,27,v2.2
 productivity_tools,translation_tools,Language translation and interpretation apps,"Google Translate, iTranslate, DeepL","Language learning apps (see general_education), dictionaries (reference_wiki)",1,v2.2
-transportation,event_cinema_ticketing,"Cinema tickets, concert tickets, and live event booking platforms","CGV Cinemas, TIX ID, Ticketmaster, BookMyShow","Travel/flight booking, sports streaming",9,v2.2
+entertainment,event_cinema_ticketing,"Cinema tickets, concert tickets, and live event booking platforms","CGV Cinemas, TIX ID, Ticketmaster, BookMyShow","Travel/flight booking, sports streaming",9,v2.2
 transportation,logistics_delivery,Package delivery tracking and logistics platforms,"J&T, SiCepat, AnterAja",Food delivery (lifestyle),6,v2.2
 transportation,navigation_maps,"Maps, navigation, and route planning apps","Google Maps, Waze, HERE",Travel booking apps,11,v2.2
 transportation,parking,Parking space finding and payment apps,"Parkee, Smark",Navigation apps,1,v2.2
