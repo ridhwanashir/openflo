@@ -29,6 +29,21 @@ include:
 #   GCP_WI_PROVIDER_PATH      — Workload Identity provider resource path
 #   GCP_SERVICE_ACCOUNT_EMAIL — SA with roles/storage.objectAdmin on the bucket
 # ---------------------------------------------------------------------------
+# DEBUG: remove once WIF attribute condition is fixed
+debug-wif-claims:
+  stage: sync-csv
+  image: google/cloud-sdk:slim
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: always
+  id_tokens:
+    GCP_OIDC_TOKEN:
+      aud: https://iam.googleapis.com/projects/427976717042/locations/global/workloadIdentityPools/gitlab-pool/providers/gitlab-ioh-provider
+  script:
+    - echo "=== OIDC claims ===" && echo "$GCP_OIDC_TOKEN" | cut -d'.' -f2 | python3 -c "import sys,base64,json; d=sys.stdin.read().strip(); d+='='*(-len(d)%4); print(json.dumps(json.loads(base64.b64decode(d)),indent=2))"
+    - echo "CI_PROJECT_PATH=$CI_PROJECT_PATH"
+    - echo "CI_PROJECT_NAMESPACE=$CI_PROJECT_NAMESPACE"
+
 upload-csv-to-gcs:
   stage: sync-csv
   extends: .gcp-wif-auth
