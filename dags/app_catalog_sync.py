@@ -50,7 +50,6 @@ BQ_SCHEMA = [
     {"name": "secondary_category",     "type": "STRING", "mode": "NULLABLE"},
     {"name": "secondary_subcategory",  "type": "STRING", "mode": "NULLABLE"},
     {"name": "description",            "type": "STRING", "mode": "NULLABLE"},
-    {"name": "review_status",          "type": "STRING", "mode": "NULLABLE"},
     {"name": "persona",                "type": "STRING", "mode": "REPEATED"},
 ]
 

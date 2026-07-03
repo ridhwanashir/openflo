@@ -70,7 +70,6 @@ There are two CSV files in this repo that the DAG syncs to BigQuery.
 | `secondary_category` | Single value | Optional second category |
 | `secondary_subcategory` | Single value | Optional second subcategory |
 | `description` | Single value | Free text description |
-| `review_status` | Single value | Classification confidence: `correct`, `debatable`, `needs_external_verification` |
 | `persona` | **Pipe-separated** (`\|`) | Assigned persona(s) for user segmentation (e.g. `cashless_lifestyle`, `ecommerce_addict\|cashless_lifestyle`) |
 
 ### Multi-value field format
@@ -318,7 +317,6 @@ To switch, edit the `validate` function in `dags/app_catalog_sync.py`.
 | `secondary_category` | STRING | NULLABLE |
 | `secondary_subcategory` | STRING | NULLABLE |
 | `description` | STRING | NULLABLE |
-| `review_status` | STRING | NULLABLE |
 | `persona` | STRING | **REPEATED** |
 
 ### Taxonomy Reference

@@ -139,11 +139,13 @@ EXECUTE IMMEDIATE
 EXECUTE IMMEDIATE
   '''CREATE OR REPLACE TABLE `''' || v_bq_project || '''.''' || v_bq_tar_dataset || '''.persona_app_map''' || weekly_suffix || '''_''' || timestamp_id || '''` AS
   SELECT DISTINCT
-    LOWER(r.app_name) AS app_name,
+    LOWER(sig_app_tag) AS app_name,
     p AS persona_name
   FROM `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2` r,
+       UNNEST(r.sig_app_tags) AS sig_app_tag,
        UNNEST(r.persona) AS p
-  WHERE ARRAY_LENGTH(r.persona) > 0''';
+  WHERE ARRAY_LENGTH(r.sig_app_tags) > 0
+    AND ARRAY_LENGTH(r.persona) > 0''';
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
