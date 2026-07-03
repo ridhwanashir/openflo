@@ -1,8 +1,8 @@
 """
 DAG: app_catalog_sync
 ---------------------
-Downloads rnr_app_category_v2.csv from GCS (pushed there by GitLab CI),
-parses pipe-separated REPEATED STRING fields (including the `persona` column),
+Downloads rnr_app_category_v2.csv from the private GitLab repo, parses
+pipe-separated REPEATED STRING fields (including the `persona` column),
 and does a full WRITE_TRUNCATE load into BigQuery.
 
 The taxonomy table (`rnr_taxonomy_reference`) is **derived** from the app
@@ -10,13 +10,13 @@ catalog in-memory — no separate GitLab download. Each DAG run appends a
 date-partitioned snapshot (partition-level TRUNCATE for idempotency on
 same-day re-runs).
 
-No Airflow Variables required — the Composer SA reads directly from GCS.
-GCS source: gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
+Required Airflow Variables (set via Composer UI or `airflow variables set`):
+  GITLAB_PAT     — GitLab Personal Access Token with `read_repository` scope
+  GITLAB_RAW_URL — raw URL to rnr_app_category_v2.csv in the repo
 
 Team editing workflow:
   Edit rnr_app_category_v2.csv on GitLab
-  → GitLab CI (WIF) uploads the file to GCS on every push to the default branch
-  → DAG picks up the latest version from GCS on next run
+  → DAG picks up the latest committed version on next run
   → Taxonomy is auto-derived from the catalog (no separate file to maintain)
 """
 
@@ -26,6 +26,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import requests
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
@@ -93,19 +94,20 @@ def _parse_array_field(value: str) -> list:
 def sync_catalog(**context):
     from google.cloud import bigquery
 
-    # --- Download from GCS ---
-    from google.cloud import storage as gcs
+    # --- Download ---
+    pat = Variable.get("gitlab_pat_rnr_read_only")
+    raw_url = Variable.get("gitlab_raw_url_rnr_app_category_mapping")
 
-    csv_text = (
-        gcs.Client()
-        .bucket("create_gcs_table")
-        .blob("app-category-mapping/rnr_app_category_v2.csv")
-        .download_as_text()
+    resp = requests.get(
+        raw_url,
+        headers={"PRIVATE-TOKEN": pat},
+        timeout=30,
     )
-    logging.info("Downloaded app catalog from GCS: %d bytes", len(csv_text))
+    resp.raise_for_status()
+    logging.info("Downloaded app catalog: %d bytes from GitLab", len(resp.content))
 
     # --- Parse ---
-    reader = csv.DictReader(io.StringIO(csv_text))
+    reader = csv.DictReader(io.StringIO(resp.text))
     rows = []
     for row in reader:
         for field in ARRAY_FIELDS:
