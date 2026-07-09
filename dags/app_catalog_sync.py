@@ -120,7 +120,10 @@ def sync_catalog(**context):
 
     # --- Load ---
     client = bigquery.Client(project=BQ_PROJECT)
-    schema = [bigquery.SchemaField(**f) for f in BQ_SCHEMA]
+    schema = [
+        bigquery.SchemaField(f["name"], f["type"], mode=f.get("mode", "NULLABLE"))
+        for f in BQ_SCHEMA
+    ]
     job_config = bigquery.LoadJobConfig(
         schema=schema,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
@@ -174,7 +177,10 @@ def sync_taxonomy(**context):
     # Writing to table$YYYYMMDD overwrites only that day's partition,
     # preserving historical partitions (idempotent on same-day re-runs).
     client = bigquery.Client(project=BQ_PROJECT)
-    schema = [bigquery.SchemaField(**f) for f in BQ_TAXONOMY_SCHEMA]
+    schema = [
+        bigquery.SchemaField(f["name"], f["type"], mode=f.get("mode", "NULLABLE"))
+        for f in BQ_TAXONOMY_SCHEMA
+    ]
     partition_suffix = snapshot_date.replace("-", "")
     partitioned_dest = f"{BQ_TAXONOMY_TABLE_REF}${partition_suffix}"
 
@@ -257,7 +263,7 @@ schedule_interval = _schedule_intervals.get("app_catalog_sync", None)
 
 with DAG(
     dag_id="app_catalog_sync",
-    description="Sync app catalog from GCS to BigQuery; derive taxonomy snapshot automatically",
+    description="Sync app catalog from GitLab to BigQuery; derive taxonomy snapshot automatically",
     schedule_interval=schedule_interval,  # None = manual trigger; set via Variable to schedule
     start_date=datetime(2026, 5, 6),
     catchup=False,
