@@ -21,20 +21,18 @@ include:
   file: '.gcp-wif-auth.yml'
 
 # ---------------------------------------------------------------------------
-# Upload rnr_app_category_v2.csv to GCS on every push to the default branch.
-# Cloud Composer reads the file from GCS — no direct GitLab access needed.
-#
-# Placeholders to fill before merging:
-#   GCP_WI_PROVIDER_PATH      — Workload Identity provider resource path
-#   GCP_SERVICE_ACCOUNT_EMAIL — SA with roles/storage.objectAdmin on the bucket
+# Intended future automation: upload rnr_app_category_v2.csv to GCS from GitLab.
+# Current operating mode is manual GCS upload because runner WIF access to GCS
+# is not confirmed working. Cloud Composer reads only the GCS object.
 # ---------------------------------------------------------------------------
-# DEBUG: remove once WIF attribute condition is fixed
+# DEBUG: keep manual until WIF / GCS access is fixed.
 debug-wif-claims:
   stage: sync-csv
   image: google/cloud-sdk:slim
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      when: always
+      when: manual
+      allow_failure: true
   id_tokens:
     GCP_OIDC_TOKEN:
       aud: https://iam.googleapis.com/projects/427976717042/locations/global/workloadIdentityPools/gitlab-pool/providers/gitlab-ioh-provider
@@ -55,6 +53,8 @@ upload-csv-to-gcs:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       changes:
         - rnr_app_category_v2.csv
+      when: manual
+      allow_failure: true
   script:
     - gcloud storage cp rnr_app_category_v2.csv
         gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv

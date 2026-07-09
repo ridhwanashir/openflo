@@ -1,22 +1,23 @@
 """
 DAG: app_catalog_sync
 ---------------------
-Downloads rnr_app_category_v2.csv from the private GitLab repo, parses
+Downloads rnr_app_category_v2.csv from GCS, parses
 pipe-separated REPEATED STRING fields (including the `persona` column),
 and does a full WRITE_TRUNCATE load into BigQuery.
 
 The taxonomy table (`rnr_taxonomy_reference`) is **derived** from the app
-catalog in-memory — no separate GitLab download. Each DAG run appends a
+catalog in-memory — no separate GCS download. Each DAG run appends a
 date-partitioned snapshot (partition-level TRUNCATE for idempotency on
 same-day re-runs).
 
-Required Airflow Variables (set via Composer UI or `airflow variables set`):
-  GITLAB_PAT     — GitLab Personal Access Token with `read_repository` scope
-  GITLAB_RAW_URL — raw URL to rnr_app_category_v2.csv in the repo
+GCS source:
+  bucket : create_gcs_table
+  blob   : app-category-mapping/rnr_app_category_v2.csv
 
 Team editing workflow:
-  Edit rnr_app_category_v2.csv on GitLab
-  → DAG picks up the latest committed version on next run
+  Edit rnr_app_category_v2.csv → commit to GitLab
+  → manually upload the committed CSV to GCS
+  → trigger the DAG so it picks up the latest GCS version
   → Taxonomy is auto-derived from the catalog (no separate file to maintain)
 """
 
@@ -26,7 +27,6 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-import requests
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
@@ -91,23 +91,22 @@ def _parse_array_field(value: str) -> list:
 # ---------------------------------------------------------------------------
 # Task 1: sync_catalog — download → parse → load app catalog to BQ
 # ---------------------------------------------------------------------------
+GCS_BUCKET = "create_gcs_table"
+GCS_BLOB   = "app-category-mapping/rnr_app_category_v2.csv"
+
+
 def sync_catalog(**context):
-    from google.cloud import bigquery
+    from google.cloud import bigquery, storage
 
-    # --- Download ---
-    pat = Variable.get("gitlab_pat_rnr_read_only")
-    raw_url = Variable.get("gitlab_raw_url_rnr_app_category_mapping")
-
-    resp = requests.get(
-        raw_url,
-        headers={"PRIVATE-TOKEN": pat},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    logging.info("Downloaded app catalog: %d bytes from GitLab", len(resp.content))
+    # --- Download from GCS ---
+    gcs_client = storage.Client()
+    blob = gcs_client.bucket(GCS_BUCKET).blob(GCS_BLOB)
+    content = blob.download_as_text()
+    logging.info("Downloaded app catalog: %d bytes from GCS gs://%s/%s",
+                 len(content), GCS_BUCKET, GCS_BLOB)
 
     # --- Parse ---
-    reader = csv.DictReader(io.StringIO(resp.text))
+    reader = csv.DictReader(io.StringIO(content))
     rows = []
     for row in reader:
         for field in ARRAY_FIELDS:
@@ -258,7 +257,7 @@ schedule_interval = _schedule_intervals.get("app_catalog_sync", None)
 
 with DAG(
     dag_id="app_catalog_sync",
-    description="Sync app catalog from GitLab to BigQuery; derive taxonomy snapshot automatically",
+    description="Sync app catalog from GCS to BigQuery; derive taxonomy snapshot automatically",
     schedule_interval=schedule_interval,  # None = manual trigger; set via Variable to schedule
     start_date=datetime(2026, 5, 6),
     catchup=False,

@@ -10,11 +10,11 @@
 2. [The CSVs — Source of Truth](#2-the-csvs--source-of-truth)
 3. [How to Update the App Catalog](#3-how-to-update-the-app-catalog)
 4. [One-Time Setup: Deploy the Airflow DAG](#4-one-time-setup-deploy-the-airflow-dag)
-5. [One-Time Setup: CI/CD & GCS Configuration](#5-one-time-setup-cicd--gcs-configuration)
+5. [GCS Handoff And Automation Status](#5-gcs-handoff-and-automation-status)
 6. [Running the DAG (Manual Trigger)](#6-running-the-dag-manual-trigger)
 7. [How the DAG Works (Step by Step)](#7-how-the-dag-works-step-by-step)
 8. [BigQuery Tables Reference](#8-bigquery-tables-reference)
-9. [What is rnr_user_persona_small_segment_temp_3?](#9-what-is-rnr_user_persona_small_segment_temp_3)
+9. [What is stg_nio_appsrtgout_usecase_weekly?](#9-what-is-stg_nio_appsrtgout_usecase_weekly)
 10. [Troubleshooting](#10-troubleshooting)
 11. [Cheat Sheet](#11-cheat-sheet)
 
@@ -25,32 +25,45 @@
 ```
 You / Team
    │
-   │  Edit rnr_app_category_v2.csv or taxonomy_reference.csv
+   │  Edit rnr_app_category_v2.csv
    ▼
-GitLab Repo  ←──── single source of truth for BOTH files
+GitLab Repo  ←──── source of truth for the app catalog CSV
    │
-   │  Airflow DAG downloads both files via GitLab API (using PAT)
+   │  CURRENT: manually upload the latest committed CSV
+   ▼
+GCS: gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
+   │
+   │  Cloud Composer DAG reads the GCS object
    ▼
 Cloud Composer (Airflow)
    │
-   │  Parses CSV → full replace (WRITE_TRUNCATE) for each table
+   │  Parses CSV → full replace app catalog → derive taxonomy snapshot
    ▼
 BigQuery: data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2
 BigQuery: data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference
    │
-   │  user_persona_query_v2.sql reads these tables
+   │  weekly stored procedure reads these tables
    ▼
-BigQuery: core_analytics.rnr_user_persona_small_segment_temp_3
-(18 personas × High Engaged Users only)
+BigQuery: stg_nio_appsrtgout_usecase_weekly
+(18 personas × all engagement groups)
 ```
 
 **Key principle:** The CSV is always the complete list. Every DAG run wipes the BQ table and reloads from scratch. No manual BQ edits — any change made directly in BQ will be overwritten on the next run.
+
+**Current operating mode:** GitLab is the human source of truth, but it is not automatically connected to GCS or Composer yet. Upload the latest committed CSV to GCS manually, then trigger the DAG.
+
+**Known automation blockers:**
+
+| Path | Current blocker |
+|---|---|
+| GitLab runner → GCS | Runner / service account WIF access to GCS is not confirmed working |
+| Composer DAG → GitLab repo | Composer does not currently have GitLab repository access |
 
 ---
 
 ## 2. The CSVs — Source of Truth
 
-There are two CSV files in this repo that the DAG syncs to BigQuery.
+There is one active CSV file that the DAG syncs to BigQuery.
 
 ---
 
@@ -100,7 +113,7 @@ SomeApp,,tag1|tag2,Category,,,,
 
 ### File 2: `taxonomy_reference.csv` (historical artifact)
 
-**BigQuery target:** `core_analytics.rnr_taxonomy_reference`
+**BigQuery target:** none directly
 
 > **Note:** The taxonomy table is now **auto-derived** from the app catalog by the DAG on each run. You no longer need to manually maintain `taxonomy_reference.csv`. The CSV is kept in the repo as a historical reference only.
 
@@ -114,13 +127,13 @@ The taxonomy table in BigQuery is partitioned by `taxonomy_version` (DATE), with
 | `app_count` | Integer | Number of apps in this subcategory (auto-computed) |
 | `taxonomy_version` | DATE | DAG execution date (partition key) |
 
-> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, the taxonomy is updated automatically on the next DAG run. No manual edit to `taxonomy_reference.csv` is needed.
+> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, the taxonomy is updated on the next DAG run after the latest CSV has been uploaded to GCS. A GitLab commit alone does not update BigQuery. No manual edit to `taxonomy_reference.csv` is needed.
 
 ---
 
 ## 3. How to Update the App Catalog
 
-You have two options. Both result in the same thing — a committed change to `rnr_app_category_v2.csv` in GitLab.
+You have two options. Both result in the same thing — a committed change to `rnr_app_category_v2.csv` in GitLab. After committing, the current production handoff still requires a manual GCS upload.
 
 ### Option A — Edit directly on GitLab (no local setup needed)
 
@@ -129,13 +142,17 @@ You have two options. Both result in the same thing — a committed change to `r
 3. Click the **Edit** (pencil) button
 4. Make your changes in the web editor
 5. Scroll down → write a commit message → click **Commit changes**
-6. That's it. The DAG will pick up the new version on its next run (or trigger it manually — see [Section 6](#6-running-the-dag-manual-trigger))
+6. Download or pull the latest committed CSV, then upload it to GCS:
+   ```bash
+   gcloud storage cp rnr_app_category_v2.csv gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
+   ```
+7. Trigger the DAG manually — see [Section 6](#6-running-the-dag-manual-trigger)
 
 ### Option B — Edit locally and push
 
 ```bash
 # 1. Pull latest
-git pull upstream main
+git pull gitlab master
 
 # 2. Edit the file in Excel / any editor
 #    Save as CSV (UTF-8, comma-separated)
@@ -146,7 +163,10 @@ grep -c '\[' rnr_app_category_v2.csv
 # 4. Commit and push
 git add rnr_app_category_v2.csv
 git commit -m "Update app catalog: <describe what changed>"
-git push upstream main
+git push gitlab master
+
+# 5. Upload the latest committed CSV to GCS
+gcloud storage cp rnr_app_category_v2.csv gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
 ```
 
 > **Warning:** If you open the CSV in Excel and save it, Excel may alter the formatting. Check that pipe-separated values are still intact and the file is still comma-delimited before pushing.
@@ -174,10 +194,10 @@ The Airflow scheduler picks up new DAG files within ~1–2 minutes automatically
 
 ---
 
-## 5. One-Time Setup: CI/CD & GCS Configuration
+## 5. GCS Handoff And Automation Status
 
-The DAG reads `rnr_app_category_v2.csv` from GCS — **no Airflow Variables needed**.
-GitLab CI uploads the file to GCS automatically on every push to the default branch.
+The DAG reads `rnr_app_category_v2.csv` from GCS — **no GitLab Airflow Variables needed**.
+The current working handoff is manual upload to GCS.
 
 ### GCS source path
 
@@ -187,24 +207,32 @@ gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
 
 The Composer Service Account already has read access to this bucket.
 
-### Completing the GitLab CI job (one-time)
+### Manual upload
 
-Before merging `.gitlab-ci.yml` for the first time, fill in the two placeholders
-in the `upload-csv-to-gcs` job:
+After a CSV change is committed to GitLab, upload the exact committed CSV:
 
-| Placeholder | What to put there |
+```bash
+gcloud storage cp rnr_app_category_v2.csv gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv
+```
+
+### GitLab CI upload status
+
+`.gitlab-ci.yml` contains a manual `upload-csv-to-gcs` job for future automation testing, but do not treat it as the production path yet.
+
+| Requirement | Current status |
 |---|---|
-| `<PLACEHOLDER_WI_PROVIDER_PATH>` | Workload Identity provider resource path (ask your platform team) |
-| `<PLACEHOLDER_SA_EMAIL>` | Service Account email with `roles/storage.objectAdmin` on the bucket |
+| GitLab OIDC / WIF provider | Configured in `.gitlab-ci.yml` |
+| GitLab runner service account | `gitlab-ci-de@appl-int-df-prd-wd2y.iam.gserviceaccount.com` |
+| Target GCS project | `data-int-advana-prd-77c3` |
+| GCS object write access | Not confirmed working |
 
-Once filled, every push that modifies `rnr_app_category_v2.csv` will automatically
-upload the latest version to GCS.
+Once WIF and bucket permissions are fixed, the manual CI job can be promoted back to an automatic upload job.
 
 ---
 
 ## 6. Running the DAG (Manual Trigger)
 
-After editing either CSV and committing to GitLab:
+After editing the CSV, committing to GitLab, and uploading the latest CSV to GCS:
 
 1. Go to **Cloud Composer → [your environment] → Open Airflow UI**
 2. Find `app_catalog_sync` in the DAG list
@@ -219,16 +247,16 @@ You will see three tasks run in sequence:
 
 ### Choosing a sync schedule
 
-The DAG is currently set to **`@daily`**. Other options (change `schedule_interval` in `dags/app_catalog_sync.py`):
+The DAG is currently **manual-trigger by default**. It only becomes scheduled if the Airflow Variable `schedule_interval` includes an entry for `app_catalog_sync`.
 
 | Option | Setting | Best for |
 |---|---|---|
-| **A — Daily** (current) | `@daily` | Frequent catalog updates, set-and-forget |
-| **B — Weekly** | `@weekly` | Stable catalog, infrequent changes |
-| **C — Manual only** | `None` | Full control, no automatic runs |
-| **D — On push (GitLab CI)** | `None` + GitLab CI webhook | Instant sync on every commit |
+| **A — Manual** (current) | missing key or `null` | Full control while GCS upload is manual |
+| **B — Daily** | `@daily` | Frequent catalog updates after upload automation is reliable |
+| **C — Weekly** | `@weekly` | Stable catalog, infrequent changes |
+| **D — On push** | manual DAG trigger from CI | Future option after GitLab runner WIF is fixed |
 
-Option D requires setting up a GitLab CI pipeline that calls the Airflow REST API trigger endpoint. Ask your platform team if you want to go that route.
+On-push sync requires two pieces that are not currently in place: GitLab runner write access to GCS and a reliable way to trigger Composer after upload.
 
 ### Expected run time
 
@@ -356,28 +384,26 @@ UNNEST(sig_app_tags) AS tag;
 
 ---
 
-## 9. What is `rnr_user_persona_small_segment_temp_3`?
+## 9. What is `stg_nio_appsrtgout_usecase_weekly`?
 
-This is the **output table** produced by the weekly stored procedure `bq_sp_national_stg_nio_appsrtgout_usecase_weekly`. It is not maintained by the DAG — it is regenerated weekly by the SP.
+This is the **output table** produced by the weekly stored procedure `bq_sp_national_stg_nio_appsrtgout_usecase_weekly`. It is not maintained by the DAG — it is regenerated by the SP.
 
 > **Note:** `user_persona_query_v2.sql` is deprecated. Use the stored procedure instead.
 
 ### What it contains
 
-One row per `(msisdn, user_persona)` pair — a subscriber can appear in multiple personas.
-Only **High Engaged Users** are included (filtered from all engagement groups).
+One row per `(msisdn, application_name, user_persona)` style result from the app-usage pipeline. A subscriber can appear in multiple personas and engagement groups.
 
 | Column | Description |
 |---|---|
 | `msisdn` | Hashed subscriber identifier |
+| `application_name` | App tag from the usage source after catalog filtering |
+| `traffic`, `recency`, `frequency` | Per-app usage features for the weekly lookback window |
+| `traffic_decile`, `recency_decile`, `frequency_decile` | Per-app deciles, then used for persona-level scoring |
+| `engagement_group` | Per-app engagement group |
 | `user_persona` | Assigned persona (e.g. `gamers`, `cashless_lifestyle`) |
-| `engagement_group` | Always `High Engaged User` in this table |
-| `category_traffic` | Total traffic volume across persona apps |
-| `category_recency` | Days since last interaction with any persona app |
-| `category_frequency` | Total app-days (how many days the user touched persona apps) |
-| `traffic_decile` | Traffic rank within the persona (1–10) |
-| `recency_decile` | Recency rank within the persona (1–10) |
-| `frequency_decile` | Frequency rank within the persona (1–10) |
+| `persona_score` | Sum of persona-level traffic, recency, and frequency deciles |
+| `partition_date`, `job_id`, `insert_timestamp` | Load metadata |
 
 ### The 18 personas
 
@@ -407,7 +433,12 @@ Only **High Engaged Users** are included (filtered from all engagement groups).
 The stored procedure runs weekly on schedule. To run manually:
 
 ```sql
-CALL `appl-int-df-prd-wd2y.bq_df_dm3_prd_owned_sor.bq_sp_national_stg_nio_appsrtgout_usecase_weekly`();
+CALL `appl-int-df-prd-wd2y.bq_df_dm3_prd_owned_sor.bq_sp_national_stg_nio_appsrtgout_usecase_weekly`(
+  '<bq_project>',
+  '<source_dataset>',
+  '<target_dataset>',
+  DATE '<run_date>'
+);
 ```
 
 The version-controlled SP source is at `stored_procedures/bq_sp_national_stg_nio_appsrtgout_usecase_weekly.sql`.
