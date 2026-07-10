@@ -37,6 +37,8 @@ BigQuery: stg_nio_appsrtgout_usecase_weekly
 
 **GCP Project:** `data-int-advana-prd-77c3` | **BQ Dataset:** `core_analytics`
 
+> **Note:** The `gs://create_gcs_table` bucket also lives in project `data-int-advana-prd-77c3` (same project as the BigQuery dataset).
+
 ---
 
 ## Quick Start
@@ -44,6 +46,7 @@ BigQuery: stg_nio_appsrtgout_usecase_weekly
 See [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) for full step-by-step instructions.
 
 ### Edit the app catalog
+> **Access:** Editing the CSV on GitLab requires VPN access.
 1. Open `rnr_app_category_v2.csv` on GitLab → click **Edit**
 2. Use `|` (pipe) to separate multiple values in `sig_app_tags`, `nio_aggr_app_tags`, and `persona`
 3. Commit the change
@@ -140,3 +143,11 @@ Known blockers before full automation:
 ```bash
 git remote add gitlab https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-application-mapping.git
 ```
+
+> **Access:** The GitLab instance (`mygitlab-dev.ioh.co.id`) requires VPN access.
+
+---
+
+## Related / Upcoming Work
+
+A separate repo, `DS-IOH-SDA-Application-Mapping-Automation`, is developing an automation pipeline (`sda_app_mapping_automation`, weekly) to auto-discover new unmapped apps from traffic data, research them via Cloud Run (Tavily search + Gemini classification), and route proposals through a Teams approval step before they land in this repo's `rnr_app_category_v2.csv` / SSOT table. **This automation is not yet in production** — this repo remains the source of truth and the current manual workflow (GitLab → GCS → DAG) is still required until that automation ships.

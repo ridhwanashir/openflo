@@ -59,3 +59,7 @@ Known automation blockers:
 - Who owns fixing GitLab runner WIF access to `gs://create_gcs_table`?
 - Should the DAG remain manual-trigger while GCS upload is manual, or should it be scheduled after upload discipline is stable?
 - Should deprecated `user_persona_query_v2.sql` and `user_persona_query_v2_old.sql` be archived after the stored procedure is confirmed in production?
+
+## Related / Upcoming Work (Separate Repo)
+
+A separate repo, `DS-IOH-SDA-Application-Mapping-Automation`, is building `sda_app_mapping_automation` — a weekly DAG that diffs new unmapped apps from traffic data against this repo's SSOT, researches them via Cloud Run (Tavily search + Gemini classification), and routes proposals through Teams approval before they land in `rnr_app_category_v2.csv`. **Not yet in production** — this repo's manual GitLab → GCS → DAG workflow remains the only active path until that automation ships.

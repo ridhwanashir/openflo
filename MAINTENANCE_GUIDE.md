@@ -59,6 +59,9 @@ BigQuery: stg_nio_appsrtgout_usecase_weekly
 | GitLab runner → GCS | Runner / service account WIF access to GCS is not confirmed working |
 | Composer DAG → GitLab repo | Composer does not currently have GitLab repository access |
 
+> **GCS project:** The `create_gcs_table` bucket lives in project `data-int-advana-prd-77c3` (same project as the BigQuery dataset).
+> **Access:** Editing the CSV on GitLab requires VPN access (GitLab instance is `mygitlab-dev.ioh.co.id`).
+
 ---
 
 ## 2. The CSVs — Source of Truth
@@ -136,6 +139,8 @@ The taxonomy table in BigQuery is partitioned by `taxonomy_version` (DATE), with
 You have two options. Both result in the same thing — a committed change to `rnr_app_category_v2.csv` in GitLab. After committing, the current production handoff still requires a manual GCS upload.
 
 ### Option A — Edit directly on GitLab (no local setup needed)
+
+> **Access:** Requires VPN access to reach `mygitlab-dev.ioh.co.id`.
 
 1. Go to your company GitLab repo
 2. Open `rnr_app_category_v2.csv`
