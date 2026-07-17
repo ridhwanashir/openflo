@@ -40,12 +40,14 @@ BQ_DATASET = "core_analytics"
 BQ_TABLE = "rnr_app_category_v2"
 BQ_TABLE_REF = f"{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE}"
 
-ARRAY_FIELDS = {"sig_app_tags", "nio_aggr_app_tags", "persona"}
+ARRAY_FIELDS = {"sig_app_tags", "nio_aggr_app_tags", "persona", "els_norm_app_tags", "els_host"}
 
 BQ_SCHEMA = [
     {"name": "app_name",               "type": "STRING", "mode": "NULLABLE"},
     {"name": "nio_aggr_app_tags",      "type": "STRING", "mode": "REPEATED"},
     {"name": "sig_app_tags",           "type": "STRING", "mode": "REPEATED"},
+    {"name": "els_norm_app_tags",      "type": "STRING", "mode": "REPEATED"},
+    {"name": "els_host",              "type": "STRING", "mode": "REPEATED"},
     {"name": "category",               "type": "STRING", "mode": "NULLABLE"},
     {"name": "subcategory",            "type": "STRING", "mode": "NULLABLE"},
     {"name": "secondary_category",     "type": "STRING", "mode": "NULLABLE"},
