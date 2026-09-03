@@ -156,7 +156,7 @@ Known blockers before full automation:
 ### GitLab remote
 
 ```bash
-git remote add gitlab https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-application-mapping.git
+git remote add gitlab https://mygitlab-dev.ioh.co.id/cbo/b2b-data-monetization/data-scientist/ds-ioh-sda-app-catalog-taxonomy.git
 ```
 
 > **Access:** The GitLab instance (`mygitlab-dev.ioh.co.id`) requires VPN access.
