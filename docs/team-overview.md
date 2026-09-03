@@ -9,7 +9,7 @@ Pipeline ini menyatukan app taxonomy, tags, dan persona mapping ke dalam satu **
 ## Workflow
 Workflow dijalankan oleh Airflow DAG `app_catalog_sync` (manual trigger by default, Cloud Composer). Alurnya:
 
-1. **Source of truth:** `rnr_app_category_v2.csv` di GitLab — kolom `app_name`, `sig_app_tags`, `nio_aggr_app_tags`, `category`, `subcategory`, `description`, dan `persona` (multi-value pakai pipe `|`).
+1. **Source of truth:** `rnr_app_category_v2.csv` di GitLab — kolom `app_name`, `sig_app_tags`, `nio_aggr_app_tags`, `els_norm_app_tags`, `els_host`, `category`, `subcategory`, `description`, dan `persona` (multi-value pakai pipe `|`). Field ELS sudah tersedia di schema tetapi masih kosong sampai proses enrichment ELS diimplementasikan.
 2. **Upload to GCS:** CSV yang sudah di-commit di-upload ke `gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv`.
 3. **DAG `app_catalog_sync`:** baca CSV dari GCS → parse pipe-separated fields → **full `WRITE_TRUNCATE` load** ke `rnr_app_category_v2`, sekaligus derive taxonomy snapshot ke `rnr_taxonomy_reference` (date-partitioned, idempotent per hari).
 4. **Downstream consumption:** beberapa SP di SDA platform (lihat appendix) join ke SSOT ini untuk enrichment app category/persona.

@@ -81,6 +81,8 @@ There is one active CSV file that the DAG syncs to BigQuery.
 | `app_name` | Single value | Display name of the app |
 | `nio_aggr_app_tags` | **Pipe-separated** (`\|`) | Alternative/legacy app identifiers (maps to NIO aggregated app tags) |
 | `sig_app_tags` | **Pipe-separated** (`\|`) | Tags used to match user activity |
+| `els_norm_app_tags` | **Pipe-separated** (`\|`) | Reserved normalized ELS app tags; currently blank pending ELS enrichment implementation |
+| `els_host` | **Pipe-separated** (`\|`) | Reserved ELS host values; currently blank pending ELS enrichment implementation |
 | `category` | Single value | Primary category |
 | `subcategory` | Single value | Primary subcategory |
 | `secondary_category` | Single value | Optional second category |
@@ -114,11 +116,11 @@ SomeApp,,tag1|tag2,Category,,,,
 
 ---
 
-### File 2: `taxonomy_reference.csv` (historical artifact)
+### Historical taxonomy reference
 
 **BigQuery target:** none directly
 
-> **Note:** The taxonomy table is now **auto-derived** from the app catalog by the DAG on each run. You no longer need to manually maintain `taxonomy_reference.csv`. The CSV is kept in the repo as a historical reference only.
+> **Note:** The taxonomy table is now **auto-derived** from the app catalog by the DAG on each run. The former `taxonomy_reference.csv` is retained only under `archive/legacy-catalogs/` for lineage.
 
 The taxonomy table in BigQuery is partitioned by `taxonomy_version` (DATE), with one snapshot per DAG run. Each run samples up to 5 example apps per subcategory from the catalog.
 
@@ -130,7 +132,7 @@ The taxonomy table in BigQuery is partitioned by `taxonomy_version` (DATE), with
 | `app_count` | Integer | Number of apps in this subcategory (auto-computed) |
 | `taxonomy_version` | DATE | DAG execution date (partition key) |
 
-> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, the taxonomy is updated on the next DAG run after the latest CSV has been uploaded to GCS. A GitLab commit alone does not update BigQuery. No manual edit to `taxonomy_reference.csv` is needed.
+> **Important:** If you add a new `category`/`subcategory` combination to `rnr_app_category_v2.csv`, the taxonomy is updated on the next DAG run after the latest CSV has been uploaded to GCS. A GitLab commit alone does not update BigQuery. No separate taxonomy CSV edit is needed.
 
 ---
 
@@ -482,7 +484,7 @@ Special: muslim_fashion has a supplementary intersection check
 
 The taxonomy is derived from the app catalog. If the catalog has no valid `category`/`subcategory` values, the taxonomy will be empty. Check the CSV.
 
-### taxonomy_reference.csv has a new subcategory but persona query doesn't use it
+### A new taxonomy subcategory does not appear downstream
 
 The persona mapping now lives in the `persona` column of `rnr_app_category_v2.csv`. Adding a new subcategory without assigning a persona value means those apps will fall into `others` in the SP output. To assign a persona, update the `persona` column for the relevant app rows.
 

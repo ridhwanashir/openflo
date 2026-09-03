@@ -265,7 +265,7 @@ schedule_interval = _schedule_intervals.get("app_catalog_sync", None)
 
 with DAG(
     dag_id="app_catalog_sync",
-    description="Sync app catalog from GitLab to BigQuery; derive taxonomy snapshot automatically",
+    description="Sync app catalog from GCS to BigQuery; derive taxonomy snapshot automatically",
     schedule_interval=schedule_interval,  # None = manual trigger; set via Variable to schedule
     start_date=datetime(2026, 5, 6),
     catchup=False,

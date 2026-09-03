@@ -1,65 +1,60 @@
-# Project Status - DS-IOH-Application-Mapping
+# Project Status - DS-IOH SDA App Catalog & Taxonomy
 
-Reviewed on: 2026-07-09
-Mapping confidence: High  
-Related IOH folders: `/Users/mac/Documents/IOH - IDA/Projects/SDA Small Segment Analysis`, `/Users/mac/Documents/IOH - IDA/Projects/SDA - Smart Digital Advertisement`
+Reviewed on: 2026-09-03
+Repository target name: `DS-IOH-SDA-App-Catalog-Taxonomy`
 
-## Current State
+## Purpose
 
-This repo is the SDA application taxonomy/mapping workspace. The active production artifact is `rnr_app_category_v2.csv`; GitLab remains the human source of truth, but the current runtime handoff is manual upload to GCS followed by a manual Cloud Composer DAG run.
+This repository creates and maintains the `rnr_app_category_v2` application catalog and its derived taxonomy for the IOH SDA platform. Persona segmentation is a downstream consumer of the catalog, not the repository's primary ownership boundary.
 
-Current runtime flow:
+## Active Runtime Flow
 
-1. Edit and commit `rnr_app_category_v2.csv` in GitLab.
+1. Edit and commit `rnr_app_category_v2.csv`.
 2. Manually upload the committed CSV to `gs://create_gcs_table/app-category-mapping/rnr_app_category_v2.csv`.
 3. Trigger Composer DAG `app_catalog_sync`.
-4. DAG loads `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2`.
-5. DAG derives `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference` from the app catalog on each DAG run.
-6. Weekly stored procedure reads the catalog `persona` field and writes `stg_nio_appsrtgout_usecase_weekly`.
+4. The DAG fully replaces `data-int-advana-prd-77c3.core_analytics.rnr_app_category_v2`.
+5. The DAG derives a dated snapshot in `data-int-advana-prd-77c3.core_analytics.rnr_taxonomy_reference`.
+6. Downstream stored procedures and dashboards consume the catalog.
 
-Known automation blockers:
+GitLab-to-GCS upload and Composer triggering remain manual. WIF bucket-write access is not yet confirmed, and Composer does not read the GitLab repository directly.
 
-- GitLab runner / service account WIF access to GCS is not confirmed working.
-- Composer does not currently have access to read the GitLab repo directly.
-- Until one of those paths is fixed, a GitLab commit alone does not update BigQuery.
+## Current Catalog Snapshot
 
-## Key Repo Assets
+| Metric | Value |
+|---|---:|
+| App rows | 1,199 |
+| L1 categories | 11 |
+| Category/subcategory pairs | 73 |
+| Persona labels | 18 |
+| Duplicate app names | 0 |
+| Blank descriptions | 0 |
+| Rows without `sig_app_tags` | 4 |
+| Rows without `persona` | 470 |
+| Rows populated in `els_norm_app_tags` | 0 |
+| Rows populated in `els_host` | 0 |
 
-- `Signature Apps Library 20250828(Tracker v4 20240910).csv`
-- `mis_app_category*.csv`
-- `rnr_app_category_v2.csv`
-- `taxonomy_reference.csv` (historical reference only; active taxonomy table is DAG-derived)
-- `app_mapping_migration*.ipynb`
-- `csv_to_json.ipynb`
-- `output/`
-- `stored_procedures/bq_sp_national_stg_nio_appsrtgout_usecase_weekly.sql`
-- `user_persona_query*.sql` (deprecated / historical query variants)
-- `workflows/app-mapping-*.md`
-- `agents/specialized/app-mapper.md`
+Apps still missing `sig_app_tags`: Adidas Running, Amazon Alexa, Weverse Shop, and eFootball.
 
-## Related Local Assets
+## Active Assets
 
-- `SDA Small Segment Analysis/Signature Apps Library 20250828(Tracker v4 20240910).csv`
-- `SDA Small Segment Analysis/mis_app_category.csv`
-- `Application Mapping Flow.png`
-- `Mas Elson Flow - App Store Play Store.png`
-- `User Persona Flow Diagram.png`
-- SDA New Segment Review flow assets
+- `rnr_app_category_v2.csv`: catalog source of truth.
+- `dags/app_catalog_sync.py`: GCS-to-BigQuery catalog load and taxonomy derivation.
+- `stored_procedures/bq_sp_national_stg_nio_appsrtgout_usecase_weekly.sql`: downstream weekly persona classification.
+- `.gitlab-ci.yml`: manual WIF/upload test jobs for future automation.
+- `data/reference/signature_apps_library_20250828.csv`: source reference for matching and audits.
+- `README.md`, `MAINTENANCE_GUIDE.md`, and `docs/team-overview.md`: active documentation.
 
-## Updates To Carry Forward
+Historical notebooks, catalogs, manual-load formats, persona queries, and superseded workflow documentation are retained under `archive/`. Income-score modelling assets and generic OpenFlo scaffolding were removed from this repository because they already live in the separate `DS-IOH-Model-Income-Score` repository.
 
-- Keep README and maintenance guide aligned to the current manual GCS handoff.
-- Promote the GitLab CI upload job from manual to automatic only after WIF and bucket write access are verified.
-- If Composer should read GitLab directly instead, provision GitLab repo access and deliberately revert the DAG source path from GCS to GitLab.
-- Review the 4 app rows with missing `sig_app_tags`: Adidas Running, Amazon Alexa, Weverse Shop, eFootball.
-- Decide whether the 470 rows with blank `persona` are intentionally excluded from persona segmentation.
+## Open Work
 
-## Open Questions
+- Populate or remove the placeholder ELS fields after the enrichment design is confirmed.
+- Resolve the four missing `sig_app_tags` entries.
+- Confirm whether the 470 blank persona rows are intentionally excluded.
+- Verify GitLab Runner WIF and GCS object-write permission before automating uploads.
+- Decide whether Composer should remain manual-triggered after upload automation is available.
+- Verify the deployed Composer DAG, current GCS object, and BigQuery table against this repository revision.
 
-- Who owns fixing GitLab runner WIF access to `gs://create_gcs_table`?
-- Should the DAG remain manual-trigger while GCS upload is manual, or should it be scheduled after upload discipline is stable?
-- Should deprecated `user_persona_query_v2.sql` and `user_persona_query_v2_old.sql` be archived after the stored procedure is confirmed in production?
+## Related Project
 
-## Related / Upcoming Work (Separate Repo)
-
-A separate repo, `DS-IOH-SDA-Application-Mapping-Automation`, is building `sda_app_mapping_automation` — a weekly DAG that diffs new unmapped apps from traffic data against this repo's SSOT, researches them via Cloud Run (Tavily search + Gemini classification), and routes proposals through Teams approval before they land in `rnr_app_category_v2.csv`. **Not yet in production** — this repo's manual GitLab → GCS → DAG workflow remains the only active path until that automation ships.
+`DS-IOH-SDA-Application-Mapping-Automation` is a separate planned automation pipeline for discovering and approving new unmapped apps. It is not yet the production source of truth.

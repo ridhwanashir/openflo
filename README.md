@@ -1,14 +1,30 @@
-# DS-IOH Application Mapping
+# DS-IOH SDA App Catalog & Taxonomy
 
-End-to-end pipeline for maintaining the IOH app taxonomy catalog and generating weekly user persona segments in BigQuery.
+Source repository for creating and maintaining the IOH SDA application catalog (`rnr_app_category_v2`) and its derived taxonomy in BigQuery.
+
+The weekly user-persona pipeline consumes this catalog, but persona generation is a downstream use case rather than the repository's primary responsibility.
 
 ---
 
-## What This Does
+## Repository Scope
 
-1. **Source of truth** — `rnr_app_category_v2.csv` in GitLab defines the app catalog, persona mapping, and taxonomy
-2. **Current sync path** — the latest CSV is uploaded to GCS manually, then the Airflow DAG reads that GCS object, loads it to BigQuery, and derives a taxonomy snapshot automatically
-3. **Persona generation** — a weekly stored procedure reads the `persona` column from the BQ catalog and classifies IOH subscribers into 18 behavioral personas based on app usage
+1. **Catalog source of truth** — `rnr_app_category_v2.csv` defines canonical apps, matching tags, categories, descriptions, and optional persona labels.
+2. **Derived taxonomy** — the Airflow DAG derives a dated taxonomy snapshot from the catalog. The taxonomy is not maintained as a separate production CSV.
+3. **BigQuery synchronization** — the latest committed catalog is uploaded to GCS manually, then loaded into BigQuery by the Composer DAG.
+4. **Downstream persona usage** — a weekly stored procedure reads the `persona` column and classifies IOH subscribers into 18 behavioral personas based on app usage.
+
+### Current catalog snapshot
+
+| Metric | Value |
+|---|---:|
+| App rows | 1,199 |
+| L1 categories | 11 |
+| Category/subcategory pairs | 73 |
+| Persona labels | 18 |
+| Rows without `sig_app_tags` | 4 |
+| Rows without `persona` | 470 |
+
+The schema includes repeated `els_norm_app_tags` and `els_host` fields. They are currently placeholders: all catalog rows are blank until the ELS normalization/enrichment process is implemented.
 
 ---
 
@@ -67,14 +83,13 @@ See [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) for full step-by-step instructi
 
 | File | Purpose |
 |---|---|
-| `rnr_app_category_v2.csv` | App catalog — 1,200+ apps with categories, match tags, and persona mapping |
-| `taxonomy_reference.csv` | Historical taxonomy reference (no longer used by DAG — taxonomy is auto-derived) |
+| `rnr_app_category_v2.csv` | Production catalog SSOT — 1,199 apps with categories, matching fields, descriptions, and persona mapping |
 | `dags/app_catalog_sync.py` | Airflow DAG — syncs app catalog from GCS to BigQuery and derives taxonomy on each DAG run |
 | `stored_procedures/bq_sp_...weekly.sql` | Weekly persona SP — reads persona from BQ catalog, classifies users |
-| `user_persona_query_v2.sql` | Deprecated — replaced by the stored procedure |
+| `archive/` | Historical migration inputs, notebooks, generated formats, and superseded persona queries |
+| `data/reference/signature_apps_library_20250828.csv` | Reference library used during historical tag matching and catalog audits |
+| `docs/team-overview.md` | Team-facing architecture and downstream-consumer overview |
 | `MAINTENANCE_GUIDE.md` | Full operations and troubleshooting guide |
-| `app_mapping_migration.ipynb` | Historical migration notebook |
-| `csv_to_json.ipynb` | Converts CSV to Avro/JSONL for manual BQ loads |
 
 ---
 
